@@ -44,3 +44,4 @@ jadx-output/
 
 cliff.toml
 jadx-gui/src/main/resources/logback.xml
+temp-docs/

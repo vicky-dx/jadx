@@ -6,12 +6,16 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeListener;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import javax.swing.AbstractAction;
 import javax.swing.Icon;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPopupMenu;
 import javax.swing.KeyStroke;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.EditorKit;
@@ -34,6 +38,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import jadx.api.ICodeInfo;
+import jadx.api.plugins.input.ICodeLoader;
+import jadx.core.dex.instructions.args.ArgType;
+import jadx.core.dex.nodes.ClassNode;
+import jadx.core.dex.nodes.RootNode;
+import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.gui.device.debugger.BreakpointManager;
 import jadx.gui.device.debugger.DbgUtils;
 import jadx.gui.jobs.IBackgroundTask;
@@ -47,6 +56,8 @@ import jadx.gui.ui.codearea.sync.CodeAreaSyncerAbstractFactory;
 import jadx.gui.ui.codearea.sync.SmaliSyncer;
 import jadx.gui.ui.panel.ContentPanel;
 import jadx.gui.utils.UiUtils;
+import jadx.plugins.input.dex.DexInputPlugin;
+import jadx.plugins.input.smali.SmaliUtils;
 
 public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerAbstractFactory, CodeAreaSyncee {
 	private static final Logger LOG = LoggerFactory.getLogger(SmaliArea.class);
@@ -66,8 +77,33 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 		setCodeFoldingEnabled(true);
 		this.textNode = new TextNode(node.getName());
 		this.model = showBytecode ? new DebugModel() : new NormalModel(this);
+		setEditable(!showBytecode);
+		if (!showBytecode) {
+			KeyStroke saveKey = KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton());
+			UiUtils.addKeyBinding(this, saveKey, "ApplySmaliAction", new AbstractAction() {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					applySmali();
+				}
+			});
+		}
 		setUnLoaded();
 		load();
+	}
+
+	@Override
+	protected JPopupMenu createPopupMenu() {
+		JPopupMenu popup = super.createPopupMenu();
+		if (!isShowingDalvikBytecode()) {
+			JMenuItem applyItem = new JMenuItem("Apply Smali Changes");
+			applyItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton()));
+			applyItem.addActionListener(e -> applySmali());
+			popup.add(applyItem, 0);
+			popup.add(new JPopupMenu.Separator(), 1);
+		}
+		return popup;
 	}
 
 	@Override
@@ -107,6 +143,68 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 	public void scrollToDebugPos(int pos) {
 		model.togglePosHighlight(pos);
+	}
+
+	public boolean applySmali() {
+		if (isShowingDalvikBytecode()) {
+			JOptionPane.showMessageDialog(this, "Dalvik bytecode view is read-only.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
+			return false;
+		}
+		String smaliCode = getText();
+		if (smaliCode == null || smaliCode.trim().isEmpty()) {
+			JOptionPane.showMessageDialog(this, "Smali code is empty.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
+			return false;
+		}
+		try {
+			byte[] dexBytes = SmaliUtils.assemble(smaliCode);
+			if (dexBytes == null || dexBytes.length == 0) {
+				throw new JadxRuntimeException("Assembled DEX bytes are empty");
+			}
+			LOG.info("Smali assembled successfully for class {}, size: {} bytes", getJClass().getFullName(), dexBytes.length);
+
+			// Phase 2: Inject modified bytecode into JADX decompilation context and trigger re-decompilation
+			DexInputPlugin dexInput = new DexInputPlugin();
+			ICodeLoader codeLoader = dexInput.loadDex(dexBytes, "memory.dex");
+			ClassNode targetClassNode = getJClass().getCls().getClassNode();
+			RootNode rootNode = targetClassNode.root();
+
+			List<ClassNode> reloadedTopClasses = new ArrayList<>();
+			codeLoader.visitClasses(newClsData -> {
+				String rawType = newClsData.getType();
+				ClassNode clsNode = rootNode.resolveClass(ArgType.object(rawType));
+				if (clsNode != null) {
+					clsNode.updateClassData(newClsData);
+					ClassNode topParent = clsNode.getTopParentClass();
+					if (!reloadedTopClasses.contains(topParent)) {
+						reloadedTopClasses.add(topParent);
+					}
+				}
+			});
+
+			for (ClassNode topCls : reloadedTopClasses) {
+				if (topCls.getJavaNode() != null) {
+					topCls.getJavaNode().reload();
+				}
+			}
+
+			if (contentPanel instanceof ClassCodeContentPanel) {
+				((ClassCodeContentPanel) contentPanel).refreshJavaViews();
+			}
+
+			JOptionPane.showMessageDialog(this,
+					"✓ Smali applied & Java code updated successfully!\n(Generated DEX: " + dexBytes.length + " bytes)",
+					"Apply Smali Success",
+					JOptionPane.INFORMATION_MESSAGE);
+			return true;
+		} catch (Exception e) {
+			LOG.error("Failed to assemble smali for class {}", getJClass().getFullName(), e);
+			String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+			JOptionPane.showMessageDialog(this,
+					"Smali Assembly Error:\n" + msg,
+					"Apply Smali Failed",
+					JOptionPane.ERROR_MESSAGE);
+			return false;
+		}
 	}
 
 	@Override
@@ -158,6 +256,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 		@Override
 		public void loadUI(String code) {
 			setText(code);
+			setEditable(true);
 		}
 
 		@Override
@@ -199,6 +298,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				gutter.setLineNumberFont(baseFont.deriveFont(baseFont.getSize2D() - 1.0f));
 			}
 			setText(code);
+			setEditable(false);
 			loadV2Style();
 			loadBreakpoints();
 		}

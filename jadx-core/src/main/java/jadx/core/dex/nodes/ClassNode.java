@@ -61,7 +61,7 @@ public class ClassNode extends NotificationAttrNode
 	private static final Logger LOG = LoggerFactory.getLogger(ClassNode.class);
 
 	private final RootNode root;
-	private final IClassData clsData;
+	private IClassData clsData;
 
 	private final ClassInfo clsInfo;
 	private PackageNode packageNode;
@@ -377,6 +377,13 @@ public class ClassNode extends NotificationAttrNode
 		load(clsData, true);
 
 		innerClasses.forEach(ClassNode::deepUnload);
+	}
+
+	public void updateClassData(IClassData newClsData) {
+		this.clsData = newClsData.copy();
+		this.smali = null;
+		unloadFromCache();
+		deepUnload();
 	}
 
 	public void unloadFromCache() {

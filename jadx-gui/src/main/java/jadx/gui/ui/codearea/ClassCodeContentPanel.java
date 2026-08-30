@@ -146,6 +146,27 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 		tabbedPane.putClientProperty(TABBED_PANE_TRAILING_COMPONENT, trailing);
 	}
 
+	public void refreshJavaViews() {
+		if (javaCodePanel != null) {
+			javaCodePanel.getCodeArea().refresh();
+			javaCodePanel.load();
+		}
+		CodePanel leftSelected = getCodePanel(leftTabbedPane);
+		if (leftSelected != null && leftSelected != javaCodePanel) {
+			leftSelected.getCodeArea().refresh();
+			leftSelected.load();
+		}
+		if (rightTabbedPane != null) {
+			CodePanel rightSelected = getCodePanel(rightTabbedPane);
+			if (rightSelected != null && rightSelected.getCodeArea() instanceof CodeArea) {
+				rightSelected.getCodeArea().refresh();
+				rightSelected.load();
+			}
+		}
+		revalidate();
+		repaint();
+	}
+
 	private void updateSync() {
 		caretListeners.removeAll();
 		if (!isSplitViewActivated) {
