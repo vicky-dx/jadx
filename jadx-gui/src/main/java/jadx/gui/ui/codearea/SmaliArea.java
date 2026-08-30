@@ -164,19 +164,29 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			LOG.info("Smali assembled successfully for class {}, size: {} bytes", getJClass().getFullName(), dexBytes.length);
 
 			// Phase 2: Inject modified bytecode into JADX decompilation context and trigger re-decompilation
-			DexInputPlugin dexInput = new DexInputPlugin();
-			ICodeLoader codeLoader = dexInput.loadDex(dexBytes, "memory.dex");
 			ClassNode targetClassNode = getJClass().getCls().getClassNode();
 			RootNode rootNode = targetClassNode.root();
+			String targetDexName = targetClassNode.getInputFileName();
+			if (targetDexName == null || targetDexName.equals("memory.dex") || targetDexName.isEmpty()) {
+				targetDexName = "classes.dex";
+			}
+
+			DexInputPlugin dexInput = new DexInputPlugin();
+			ICodeLoader codeLoader = dexInput.loadDex(dexBytes, targetDexName);
 
 			List<ClassNode> reloadedTopClasses = new ArrayList<>();
+			String finalTargetDexName = targetDexName;
 			codeLoader.visitClasses(newClsData -> {
 				String rawType = newClsData.getType();
 				ClassNode clsNode = rootNode.resolveClass(ArgType.object(rawType));
 				if (clsNode != null) {
-					String targetDex = clsNode.getInputFileName();
+					String origDex = clsNode.getInputFileName();
+					if (origDex == null || origDex.equals("memory.dex") || origDex.isEmpty()) {
+						origDex = finalTargetDexName;
+					}
 					clsNode.updateClassData(newClsData);
-					ModifiedDexManager.getInstance().registerModifiedClass(targetDex, rawType, dexBytes);
+					clsNode.setInputFileName(origDex);
+					ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
 					ClassNode topParent = clsNode.getTopParentClass();
 					if (!reloadedTopClasses.contains(topParent)) {
 						reloadedTopClasses.add(topParent);

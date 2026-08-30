@@ -47,6 +47,10 @@ public class ExportPatchedApkDialog extends CommonDialog {
 	private static final Logger LOG = LoggerFactory.getLogger(ExportPatchedApkDialog.class);
 
 	private final JTextField outputPathField = new JTextField();
+	private static String lastKeystorePath = "";
+	private static String lastKeyAlias = "";
+	private static int lastKeystoreTypeIndex = 0;
+
 	private final JCheckBox signCheckBox = new JCheckBox("Sign APK (Installable on Android)", true);
 	private final JComboBox<String> keystoreTypeCombo = new JComboBox<>(new String[]{
 			"Default Android Debug Certificate",
@@ -91,22 +95,22 @@ public class ExportPatchedApkDialog extends CommonDialog {
 
 		for (Map.Entry<String, Map<String, ModifiedClass>> dexEntry : modMap.entrySet()) {
 			String dexName = dexEntry.getKey();
-			for (String classType : dexEntry.getValue().keySet()) {
-				tableModel.addRow(new Object[]{dexName, classType, "Modified (In-Memory)"});
+			for (ModifiedClass modCls : dexEntry.getValue().values()) {
+				tableModel.addRow(new Object[]{dexName, modCls.getClassType(), "Modified (In-Memory)"});
 			}
 		}
 
-		JLabel tableLabel = new JLabel(String.format("Modified Classes (%d in active session):", tableModel.getRowCount()));
+		JTable table = new JTable(tableModel);
+		table.setRowHeight(22);
+		JScrollPane scrollPane = new JScrollPane(table);
+		scrollPane.setPreferredSize(new Dimension(580, 120));
+
 		c.gridx = 0;
 		c.gridy = row++;
 		c.gridwidth = 2;
 		c.weightx = 1.0;
-		mainPanel.add(tableLabel, c);
+		mainPanel.add(new JLabel("Modified Classes (" + tableModel.getRowCount() + " in active session):"), c);
 
-		JTable classesTable = new JTable(tableModel);
-		classesTable.setRowHeight(22);
-		JScrollPane scrollPane = new JScrollPane(classesTable);
-		scrollPane.setPreferredSize(new Dimension(580, 110));
 		c.gridx = 0;
 		c.gridy = row++;
 		c.gridwidth = 2;
@@ -170,24 +174,31 @@ public class ExportPatchedApkDialog extends CommonDialog {
 
 		// 5. Custom Keystore Panel
 		initCustomKeystorePanel();
+		customKeystorePathField.setText(lastKeystorePath);
+		keyAliasField.setText(lastKeyAlias);
+		keystoreTypeCombo.setSelectedIndex(lastKeystoreTypeIndex);
+
 		c.gridx = 0;
 		c.gridy = row++;
 		c.gridwidth = 2;
 		c.weightx = 1.0;
 		mainPanel.add(customKeystorePanel, c);
-		customKeystorePanel.setVisible(false);
+		boolean isCustom = lastKeystoreTypeIndex == 1;
+		customKeystorePanel.setVisible(isCustom && signCheckBox.isSelected());
 
 		keystoreTypeCombo.addActionListener(e -> {
-			boolean isCustom = keystoreTypeCombo.getSelectedIndex() == 1;
-			customKeystorePanel.setVisible(isCustom && signCheckBox.isSelected());
-			pack();
+			boolean custom = keystoreTypeCombo.getSelectedIndex() == 1;
+			customKeystorePanel.setVisible(custom && signCheckBox.isSelected());
+			revalidate();
+			repaint();
 		});
 
 		signCheckBox.addActionListener(e -> {
 			boolean enabled = signCheckBox.isSelected();
 			keystoreTypeCombo.setEnabled(enabled);
 			customKeystorePanel.setVisible(enabled && keystoreTypeCombo.getSelectedIndex() == 1);
-			pack();
+			revalidate();
+			repaint();
 		});
 
 		// 6. Progress & Status
@@ -224,6 +235,8 @@ public class ExportPatchedApkDialog extends CommonDialog {
 		getContentPane().add(mainPanel, BorderLayout.CENTER);
 		getContentPane().add(buttonPanel, BorderLayout.PAGE_END);
 
+		setMinimumSize(new Dimension(650, 480));
+		setSize(650, 520);
 		commonWindowInit();
 	}
 
@@ -347,6 +360,12 @@ public class ExportPatchedApkDialog extends CommonDialog {
 		if (isCustomKeystore && (customKeystorePath == null || !Files.exists(customKeystorePath))) {
 			JOptionPane.showMessageDialog(this, "Please select a valid custom keystore file.", "Export Error", JOptionPane.WARNING_MESSAGE);
 			return;
+		}
+
+		lastKeystoreTypeIndex = keystoreTypeCombo.getSelectedIndex();
+		if (isCustomKeystore) {
+			lastKeystorePath = customKeystorePathField.getText().trim();
+			lastKeyAlias = keyAliasField.getText().trim();
 		}
 
 		exportButton.setEnabled(false);

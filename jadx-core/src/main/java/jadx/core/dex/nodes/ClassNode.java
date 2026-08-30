@@ -381,16 +381,17 @@ public class ClassNode extends NotificationAttrNode
 
 	public void updateClassData(IClassData newClsData) {
 		String origInputFileName = getInputFileName();
-		this.clsData = newClsData.copy();
-		if (origInputFileName != null) {
-			setInputFileName(origInputFileName);
+		if (origInputFileName == null || origInputFileName.equals("memory.dex") || origInputFileName.isEmpty()) {
+			origInputFileName = newClsData.getInputFileName();
 		}
+		if (origInputFileName == null || origInputFileName.equals("memory.dex") || origInputFileName.isEmpty()) {
+			origInputFileName = "classes.dex";
+		}
+		this.clsData = newClsData.copy();
 		this.smali = null;
 		unloadFromCache();
 		deepUnload();
-		if (origInputFileName != null) {
-			setInputFileName(origInputFileName);
-		}
+		setInputFileName(origInputFileName);
 	}
 
 	public void unloadFromCache() {
