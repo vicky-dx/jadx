@@ -380,10 +380,17 @@ public class ClassNode extends NotificationAttrNode
 	}
 
 	public void updateClassData(IClassData newClsData) {
+		String origInputFileName = getInputFileName();
 		this.clsData = newClsData.copy();
+		if (origInputFileName != null) {
+			setInputFileName(origInputFileName);
+		}
 		this.smali = null;
 		unloadFromCache();
 		deepUnload();
+		if (origInputFileName != null) {
+			setInputFileName(origInputFileName);
+		}
 	}
 
 	public void unloadFromCache() {

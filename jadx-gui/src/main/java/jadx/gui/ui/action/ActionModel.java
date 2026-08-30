@@ -38,6 +38,8 @@ public enum ActionModel {
 			keyboard(KeyEvent.VK_F5, SHIFT_DOWN_MASK)),
 	SAVE_ALL(MENU_TOOLBAR, NLS.str("file.save_all"), null, "ui/menu-saveall", keyboard(KeyEvent.VK_E, ctrlButton())),
 	EXPORT(MENU_TOOLBAR, NLS.str("file.export"), null, "ui/export", keyboard(KeyEvent.VK_E, ctrlButton() | SHIFT_DOWN_MASK)),
+	EXPORT_PATCHED_APK(MENU_TOOLBAR, NLS.str("file.export_patched_apk"), null, "ui/export",
+			keyboard(KeyEvent.VK_K, ctrlButton() | SHIFT_DOWN_MASK)),
 	PREFS(MENU_TOOLBAR, NLS.str("menu.preferences"), null, "ui/settings", keyboard(KeyEvent.VK_P, ctrlButton() | SHIFT_DOWN_MASK)),
 	EXIT(MENU_TOOLBAR, NLS.str("file.exit"), null, "ui/exit", null),
 	SYNC(MENU_TOOLBAR, NLS.str("menu.sync"), null, "ui/locate", keyboard(KeyEvent.VK_T, ctrlButton())),

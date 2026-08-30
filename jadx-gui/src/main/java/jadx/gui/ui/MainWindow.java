@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.function.Consumer;
@@ -77,6 +78,7 @@ import com.formdev.flatlaf.util.UIScale;
 
 import ch.qos.logback.classic.Level;
 
+import jadx.api.ICodeCache;
 import jadx.api.JadxArgs;
 import jadx.api.JavaClass;
 import jadx.api.JavaNode;
@@ -108,10 +110,12 @@ import jadx.gui.jobs.ExportTask;
 import jadx.gui.jobs.IBackgroundTask;
 import jadx.gui.jobs.TaskStatus;
 import jadx.gui.jobs.TaskWithExtraOnFinish;
+import jadx.gui.patching.ExportPatchedApkDialog;
+import jadx.gui.patching.ModifiedClass;
+import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.logs.LogCollector;
 import jadx.gui.logs.LogOptions;
 import jadx.gui.logs.LogPanel;
-import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.plugins.context.CommonGuiPluginsContext;
 import jadx.gui.plugins.context.TreePopupMenuEntry;
 import jadx.gui.plugins.mappings.RenameMappingsGui;
@@ -585,6 +589,26 @@ public class MainWindow extends JFrame {
 			UiUtils.resetClipboardOwner();
 			update();
 		});
+		if (wrapper != null) {
+			try {
+				ICodeCache codeCache = wrapper.getArgs() != null ? wrapper.getArgs().getCodeCache() : null;
+				if (codeCache != null) {
+					for (Map<String, ModifiedClass> map : ModifiedDexManager.getInstance().getModifiedClassesByDex().values()) {
+						for (String rawType : map.keySet()) {
+							String rawName = rawType.startsWith("L") && rawType.endsWith(";")
+									? rawType.substring(1, rawType.length() - 1).replace('/', '.')
+									: rawType;
+							try {
+								codeCache.remove(rawName);
+							} catch (Exception ignored) {
+							}
+						}
+					}
+				}
+			} catch (Exception e) {
+				LOG.warn("Failed to invalidate modified classes from code cache", e);
+			}
+		}
 		wrapper.close();
 		LogCollector.getInstance().reset();
 		resetCache();
@@ -813,6 +837,17 @@ public class MainWindow extends JFrame {
 			backgroundExecutor.execute(new ExportTask(this, wrapper, new File(props.getExportPath())));
 		});
 		dialog.setVisible(true);
+	}
+
+	public void openExportPatchedApkDialog() {
+		if (!ModifiedDexManager.getInstance().hasModifications()) {
+			JOptionPane.showMessageDialog(this,
+					"No classes have been modified in this session.\nEdit a class in Smali and press Ctrl+S first.",
+					"Export Patched APK",
+					JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		new ExportPatchedApkDialog(this).setVisible(true);
 	}
 
 	public void initTree() {
@@ -1113,6 +1148,7 @@ public class MainWindow extends JFrame {
 		liveReloadMenuItem.setState(project.isEnableLiveReload());
 
 		JadxGuiAction exportAction = new JadxGuiAction(ActionModel.EXPORT, this::exportProject);
+		JadxGuiAction exportPatchedApkAction = new JadxGuiAction(ActionModel.EXPORT_PATCHED_APK, this::openExportPatchedApkDialog);
 
 		JMenu recentProjects = new JadxMenu(NLS.str("menu.recent_projects"), shortcutsController);
 		recentProjects.addMenuListener(new RecentProjectsMenuListener(this, recentProjects));
@@ -1211,6 +1247,7 @@ public class MainWindow extends JFrame {
 		renameMappings.addMenuActions(file);
 		file.addSeparator();
 		file.add(exportAction);
+		file.add(exportPatchedApkAction);
 		file.addSeparator();
 		file.add(recentProjects);
 		file.addSeparator();
@@ -1309,6 +1346,7 @@ public class MainWindow extends JFrame {
 		toolbar.add(reloadAction);
 		toolbar.addSeparator();
 		toolbar.add(exportAction);
+		toolbar.add(exportPatchedApkAction);
 		toolbar.addSeparator();
 		toolbar.add(syncAction);
 		toolbar.add(flatPkgButton);

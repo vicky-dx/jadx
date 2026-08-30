@@ -174,8 +174,9 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				String rawType = newClsData.getType();
 				ClassNode clsNode = rootNode.resolveClass(ArgType.object(rawType));
 				if (clsNode != null) {
+					String targetDex = clsNode.getInputFileName();
 					clsNode.updateClassData(newClsData);
-					ModifiedDexManager.getInstance().registerModifiedClass(clsNode.getInputFileName(), rawType, dexBytes);
+					ModifiedDexManager.getInstance().registerModifiedClass(targetDex, rawType, dexBytes);
 					ClassNode topParent = clsNode.getTopParentClass();
 					if (!reloadedTopClasses.contains(topParent)) {
 						reloadedTopClasses.add(topParent);
@@ -193,7 +194,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				((ClassCodeContentPanel) contentPanel).refreshJavaViews();
 			}
 
-			JOptionPane.showMessageDialog(this,
+			JOptionPane.showMessageDialog(contentPanel.getMainWindow(),
 					"✓ Smali applied & Java code updated successfully!\n(Generated DEX: " + dexBytes.length + " bytes)",
 					"Apply Smali Success",
 					JOptionPane.INFORMATION_MESSAGE);
@@ -201,7 +202,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 		} catch (Exception e) {
 			LOG.error("Failed to assemble smali for class {}", getJClass().getFullName(), e);
 			String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-			JOptionPane.showMessageDialog(this,
+			JOptionPane.showMessageDialog(contentPanel.getMainWindow(),
 					"Smali Assembly Error:\n" + msg,
 					"Apply Smali Failed",
 					JOptionPane.ERROR_MESSAGE);
