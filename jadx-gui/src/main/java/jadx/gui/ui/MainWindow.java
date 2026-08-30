@@ -111,6 +111,7 @@ import jadx.gui.jobs.TaskWithExtraOnFinish;
 import jadx.gui.logs.LogCollector;
 import jadx.gui.logs.LogOptions;
 import jadx.gui.logs.LogPanel;
+import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.plugins.context.CommonGuiPluginsContext;
 import jadx.gui.plugins.context.TreePopupMenuEntry;
 import jadx.gui.plugins.mappings.RenameMappingsGui;
@@ -587,6 +588,7 @@ public class MainWindow extends JFrame {
 		wrapper.close();
 		LogCollector.getInstance().reset();
 		resetCache();
+		ModifiedDexManager.getInstance().clear();
 		notifyLoadListeners(false);
 	}
 

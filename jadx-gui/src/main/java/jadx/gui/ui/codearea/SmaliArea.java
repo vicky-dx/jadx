@@ -47,6 +47,7 @@ import jadx.gui.device.debugger.BreakpointManager;
 import jadx.gui.device.debugger.DbgUtils;
 import jadx.gui.jobs.IBackgroundTask;
 import jadx.gui.jobs.LoadTask;
+import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.treemodel.JClass;
 import jadx.gui.treemodel.JNode;
 import jadx.gui.treemodel.TextNode;
@@ -174,6 +175,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				ClassNode clsNode = rootNode.resolveClass(ArgType.object(rawType));
 				if (clsNode != null) {
 					clsNode.updateClassData(newClsData);
+					ModifiedDexManager.getInstance().registerModifiedClass(clsNode.getInputFileName(), rawType, dexBytes);
 					ClassNode topParent = clsNode.getTopParentClass();
 					if (!reloadedTopClasses.contains(topParent)) {
 						reloadedTopClasses.add(topParent);
