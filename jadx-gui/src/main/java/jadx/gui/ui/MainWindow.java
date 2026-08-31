@@ -850,6 +850,25 @@ public class MainWindow extends JFrame {
 		new ExportPatchedApkDialog(this).setVisible(true);
 	}
 
+	/**
+	 * Quick Deploy action (Ctrl+Shift+R):
+	 * Patch → ZipAlign → Sign → ADB install → Launch.
+	 * <p>
+	 * For XAPK / APKS bundles, automatically merges to a universal APK via
+	 * {@link jadx.gui.patching.merger.ApkEditorBackend} — no user prompt needed.
+	 * Uses a temporary file that is cleaned up after successful installation.
+	 */
+	public void openQuickDeploy() {
+		if (!ModifiedDexManager.getInstance().hasModifications()) {
+			JOptionPane.showMessageDialog(this,
+					"No classes have been modified in this session.\nEdit a class in Smali and press Ctrl+S first.",
+					"Quick Deploy",
+					JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		new jadx.gui.patching.adb.QuickDeployDialog(this).setVisible(true);
+	}
+
 	public void initTree() {
 		treeRoot = new JRoot(this);
 		treeRoot.setFlatPackages(isFlattenPackage);
@@ -1149,6 +1168,7 @@ public class MainWindow extends JFrame {
 
 		JadxGuiAction exportAction = new JadxGuiAction(ActionModel.EXPORT, this::exportProject);
 		JadxGuiAction exportPatchedApkAction = new JadxGuiAction(ActionModel.EXPORT_PATCHED_APK, this::openExportPatchedApkDialog);
+		JadxGuiAction quickDeployAction = new JadxGuiAction(ActionModel.QUICK_DEPLOY, this::openQuickDeploy);
 
 		JMenu recentProjects = new JadxMenu(NLS.str("menu.recent_projects"), shortcutsController);
 		recentProjects.addMenuListener(new RecentProjectsMenuListener(this, recentProjects));
@@ -1248,6 +1268,7 @@ public class MainWindow extends JFrame {
 		file.addSeparator();
 		file.add(exportAction);
 		file.add(exportPatchedApkAction);
+		file.add(quickDeployAction);
 		file.addSeparator();
 		file.add(recentProjects);
 		file.addSeparator();
@@ -1347,6 +1368,7 @@ public class MainWindow extends JFrame {
 		toolbar.addSeparator();
 		toolbar.add(exportAction);
 		toolbar.add(exportPatchedApkAction);
+		toolbar.add(quickDeployAction);
 		toolbar.addSeparator();
 		toolbar.add(syncAction);
 		toolbar.add(flatPkgButton);
@@ -1395,6 +1417,8 @@ public class MainWindow extends JFrame {
 			forwardVariantAction.setEnabled(loaded);
 			syncAction.setEnabled(loaded);
 			exportAction.setEnabled(loaded);
+			exportPatchedApkAction.setEnabled(loaded);
+			quickDeployAction.setEnabled(loaded);
 			saveProjectAsAction.setEnabled(loaded);
 			reloadAction.setEnabled(loaded);
 			decompileAllAction.setEnabled(loaded);
