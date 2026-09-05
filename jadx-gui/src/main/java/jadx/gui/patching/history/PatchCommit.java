@@ -63,7 +63,11 @@ public class PatchCommit {
 	}
 
 	public boolean isDeployMilestone() {
-		return tagName != null && tagName.startsWith("deploy-");
+		return (tagName != null && tagName.startsWith("deploy-")) || message.startsWith("[deploy]");
+	}
+
+	public boolean isExportMilestone() {
+		return (tagName != null && tagName.startsWith("export-")) || message.startsWith("[export]");
 	}
 
 	public boolean isReloadSnapshot() {

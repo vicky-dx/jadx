@@ -250,12 +250,6 @@ public class QuickDeployDialog extends CommonDialog {
 			Files.deleteIfExists(alignedTemp);
 
 			// 6. ADB install
-			PatchHistoryManager.getInstance().recordDeployMilestone(
-					"Deploy to " + device.getSerial(),
-					ModifiedDexManager.getInstance().getModifiedClasses().stream()
-							.map(ModifiedClass::getClassType)
-							.collect(Collectors.toList()));
-
 			setStatus("Installing on device: " + device.getSerial() + "...");
 			final Path finalTempApk = tempApk;
 			AdbDeployer.DeployResult result = deployer.deployApk(tempApk, device.getSerial());
@@ -281,6 +275,12 @@ public class QuickDeployDialog extends CommonDialog {
 				fail("ADB installation failed. Check logcat for details.");
 				return;
 			}
+
+			PatchHistoryManager.getInstance().recordDeployMilestone(
+					"Deployed to " + device.getSerial(),
+					ModifiedDexManager.getInstance().getModifiedClasses().stream()
+							.map(ModifiedClass::getClassType)
+							.collect(Collectors.toList()));
 
 			SwingUtilities.invokeLater(() -> {
 				progressBar.setVisible(false);

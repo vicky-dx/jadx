@@ -66,6 +66,8 @@ public class PatchHistoryDialog extends CommonDialog {
 				type = "Original Baseline";
 			} else if (commit.isDeployMilestone()) {
 				type = "Deploy Milestone";
+			} else if (commit.isExportMilestone()) {
+				type = "Export Milestone";
 			} else if (commit.isReloadSnapshot()) {
 				type = "Reload Snapshot";
 			}

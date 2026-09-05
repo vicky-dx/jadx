@@ -10,9 +10,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.jetbrains.annotations.Nullable;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -187,24 +191,65 @@ public class PatchHistoryManager {
 		}
 	}
 
+	public synchronized PatchCommit recordExportMilestone(String exportInfo, Collection<String> modifiedClasses) {
+		if (!ensureInitialized()) {
+			return null;
+		}
+		try {
+			String msg = (exportInfo != null && !exportInfo.trim().isEmpty())
+					? (exportInfo.startsWith("[export]") ? exportInfo : "[export] " + exportInfo)
+					: "[export] Exported Patched APK";
+
+			RevCommit rev = git.commit()
+					.setAuthor(IDENT)
+					.setCommitter(IDENT)
+					.setMessage(msg)
+					.setAllowEmpty(true)
+					.call();
+
+			String tagName = "export-" + System.currentTimeMillis();
+			try {
+				git.tag().setName(tagName).setMessage(msg).setTagger(IDENT).call();
+			} catch (Exception e) {
+				LOG.debug("Tag creation failed for export milestone", e);
+			}
+
+			LOG.info("Recorded export milestone: [{}] {}", rev.name().substring(0, 7), msg);
+			return new PatchCommit(rev.name(), rev.getCommitTime() * 1000L,
+					IDENT.getName(), msg, tagName,
+					modifiedClasses != null ? new ArrayList<>(modifiedClasses) : Collections.emptyList());
+		} catch (Exception e) {
+			LOG.error("Failed to record export milestone", e);
+			return null;
+		}
+	}
+
 	public synchronized PatchCommit recordDeployMilestone(String milestoneName, Collection<String> modifiedClasses) {
 		if (!ensureInitialized()) {
 			return null;
 		}
 		try {
-			ObjectId head = repo.resolve(Constants.HEAD);
-			if (head == null) {
-				return null;
-			}
-			String tagName = "deploy-" + System.currentTimeMillis();
-			Ref ref = git.tag()
-					.setName(tagName)
-					.setMessage(milestoneName != null ? milestoneName : "Deploy milestone")
-					.setTagger(IDENT)
+			String msg = (milestoneName != null && !milestoneName.trim().isEmpty())
+					? (milestoneName.startsWith("[deploy]") ? milestoneName : "[deploy] " + milestoneName)
+					: "[deploy] Quick Deploy";
+
+			RevCommit rev = git.commit()
+					.setAuthor(IDENT)
+					.setCommitter(IDENT)
+					.setMessage(msg)
+					.setAllowEmpty(true)
 					.call();
-			LOG.info("Created deploy milestone tag: {}", tagName);
-			return new PatchCommit(head.name(), System.currentTimeMillis(),
-					IDENT.getName(), milestoneName, tagName,
+
+			String tagName = "deploy-" + System.currentTimeMillis();
+			try {
+				git.tag().setName(tagName).setMessage(msg).setTagger(IDENT).call();
+			} catch (Exception e) {
+				LOG.debug("Tag creation failed for deploy milestone", e);
+			}
+
+			LOG.info("Recorded deploy milestone: [{}] {}", rev.name().substring(0, 7), msg);
+			return new PatchCommit(rev.name(), rev.getCommitTime() * 1000L,
+					IDENT.getName(), msg, tagName,
 					modifiedClasses != null ? new ArrayList<>(modifiedClasses) : Collections.emptyList());
 		} catch (Exception e) {
 			LOG.error("Failed to record deploy milestone", e);
@@ -217,19 +262,24 @@ public class PatchHistoryManager {
 			return null;
 		}
 		try {
-			ObjectId head = repo.resolve(Constants.HEAD);
-			if (head == null) {
-				return null;
-			}
-			String tagName = "reload-" + System.currentTimeMillis();
-			git.tag()
-					.setName(tagName)
-					.setMessage("Snapshot before reload")
-					.setTagger(IDENT)
+			String msg = "[snapshot-before-reload] Snapshot before reload";
+			RevCommit rev = git.commit()
+					.setAuthor(IDENT)
+					.setCommitter(IDENT)
+					.setMessage(msg)
+					.setAllowEmpty(true)
 					.call();
-			LOG.info("Created pre-reload snapshot tag: {}", tagName);
-			return new PatchCommit(head.name(), System.currentTimeMillis(),
-					IDENT.getName(), "Snapshot before reload", tagName,
+
+			String tagName = "reload-" + System.currentTimeMillis();
+			try {
+				git.tag().setName(tagName).setMessage(msg).setTagger(IDENT).call();
+			} catch (Exception e) {
+				LOG.debug("Tag creation failed for reload snapshot", e);
+			}
+
+			LOG.info("Created pre-reload snapshot: [{}] {}", rev.name().substring(0, 7), tagName);
+			return new PatchCommit(rev.name(), rev.getCommitTime() * 1000L,
+					IDENT.getName(), msg, tagName,
 					modifiedClasses != null ? new ArrayList<>(modifiedClasses) : Collections.emptyList());
 		} catch (Exception e) {
 			LOG.error("Failed to record reload snapshot", e);
@@ -237,23 +287,111 @@ public class PatchHistoryManager {
 		}
 	}
 
+	private Map<String, String> getCommitToTagMap() {
+		Map<String, String> map = new HashMap<>();
+		try {
+			List<Ref> tags = git.tagList().call();
+			for (Ref ref : tags) {
+				Ref peeled = repo.getRefDatabase().peel(ref);
+				ObjectId targetId = peeled.getPeeledObjectId();
+				if (targetId == null) {
+					targetId = ref.getObjectId();
+				}
+				if (targetId != null) {
+					String name = ref.getName();
+					if (name.startsWith("refs/tags/")) {
+						name = name.substring("refs/tags/".length());
+					}
+					map.put(targetId.name(), name);
+				}
+			}
+		} catch (Exception e) {
+			LOG.debug("Failed to list tags", e);
+		}
+		return map;
+	}
+
+	private boolean isMilestoneCommit(RevCommit rev, @Nullable String tagName) {
+		String msg = rev.getFullMessage();
+		if (msg.startsWith("[export]") || msg.startsWith("[deploy]") || msg.startsWith("[snapshot]")) {
+			return true;
+		}
+		if (tagName != null && (tagName.startsWith("export-") || tagName.startsWith("deploy-") || tagName.startsWith("reload-"))) {
+			return true;
+		}
+		return false;
+	}
+
+	private boolean isFileInCommitTree(RevCommit commit, String relPath) {
+		try (TreeWalk treeWalk = TreeWalk.forPath(repo, relPath, commit.getTree())) {
+			return treeWalk != null;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private boolean isPathModifiedInCommit(RevCommit rev, String relPath) {
+		try {
+			if (rev.getParentCount() == 0) {
+				return isFileInCommitTree(rev, relPath);
+			}
+			ObjectId idCurrent = null;
+			try (TreeWalk tw = TreeWalk.forPath(repo, relPath, rev.getTree())) {
+				if (tw != null) {
+					idCurrent = tw.getObjectId(0);
+				}
+			}
+			ObjectId idParent = null;
+			try (TreeWalk tw = TreeWalk.forPath(repo, relPath, rev.getParent(0).getTree())) {
+				if (tw != null) {
+					idParent = tw.getObjectId(0);
+				}
+			}
+			if (idCurrent == null && idParent == null) {
+				return false;
+			}
+			return !Objects.equals(idCurrent, idParent);
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
 	public synchronized List<PatchCommit> getClassHistory(String classType) {
 		if (!isInitialized() || classType == null) {
 			return Collections.emptyList();
 		}
+		try {
+			ObjectId head = repo.resolve(Constants.HEAD);
+			if (head == null) {
+				return Collections.emptyList();
+			}
+		} catch (Exception e) {
+			return Collections.emptyList();
+		}
+
 		String relPath = classTypeToFilePath(classType);
 		List<PatchCommit> history = new ArrayList<>();
 		try {
-			Iterable<RevCommit> commits = git.log().addPath(relPath).call();
+			Map<String, String> commitTags = getCommitToTagMap();
+			Iterable<RevCommit> commits = git.log().call();
 			for (RevCommit rev : commits) {
-				history.add(new PatchCommit(rev.name(), rev.getCommitTime() * 1000L,
-						rev.getAuthorIdent().getName(), rev.getFullMessage(), null,
-						Collections.singletonList(classType)));
+				String tagName = commitTags.get(rev.name());
+				String msg = rev.getFullMessage();
+
+				boolean isClassEdit = msg.contains(classType) || isPathModifiedInCommit(rev, relPath);
+				boolean isMilestone = isMilestoneCommit(rev, tagName) && isFileInCommitTree(rev, relPath);
+
+				if (isClassEdit || isMilestone) {
+					history.add(new PatchCommit(rev.name(), rev.getCommitTime() * 1000L,
+							rev.getAuthorIdent().getName(), msg, tagName,
+							Collections.singletonList(classType)));
+				}
 			}
+			return history;
 		} catch (Exception e) {
 			LOG.error("Failed to get class history for {}", classType, e);
+			return Collections.emptyList();
 		}
-		return history;
 	}
 
 	public synchronized String getHistoricalSmali(String classType, int stepsBack) {
@@ -278,6 +416,11 @@ public class PatchHistoryManager {
 		List<PatchCommit> history = getClassHistory(classType);
 		if (history.isEmpty()) {
 			return null;
+		}
+		for (int i = history.size() - 1; i >= 0; i--) {
+			if (history.get(i).isBaseline()) {
+				return getSmaliAtCommit(classType, history.get(i).getFullHash());
+			}
 		}
 		String baselineCommitHash = history.get(history.size() - 1).getFullHash();
 		return getSmaliAtCommit(classType, baselineCommitHash);

@@ -121,14 +121,31 @@ class PatchHistoryManagerTest {
 	}
 
 	@Test
-	void testDeployMilestoneTagging() {
+	void testDeployAndExportMilestonesInHistory() {
 		String classType = "Lcom/example/PaymentGate;";
 		historyManager.recordBaseline(classType, "payment_base");
 		historyManager.recordEdit(classType, "payment_patched", "Bypass payment check");
 
-		PatchCommit milestone = historyManager.recordDeployMilestone("Deploy #1 - Samsung", Arrays.asList(classType));
-		assertThat(milestone).isNotNull();
-		assertThat(milestone.getTagName()).startsWith("deploy-");
+		PatchCommit exportMilestone = historyManager.recordExportMilestone("Exported Patched APK: app.apk", Arrays.asList(classType));
+		assertThat(exportMilestone).isNotNull();
+		assertThat(exportMilestone.isExportMilestone()).isTrue();
+
+		PatchCommit deployMilestone = historyManager.recordDeployMilestone("Deploy #1 - Samsung", Arrays.asList(classType));
+		assertThat(deployMilestone).isNotNull();
+		assertThat(deployMilestone.getTagName()).startsWith("deploy-");
+		assertThat(deployMilestone.isDeployMilestone()).isTrue();
+
+		List<PatchCommit> history = historyManager.getClassHistory(classType);
+		assertThat(history).hasSize(4);
+		assertThat(history.get(0).isDeployMilestone()).isTrue();
+		assertThat(history.get(1).isExportMilestone()).isTrue();
+		assertThat(history.get(2).getMessage()).isEqualTo("Bypass payment check");
+		assertThat(history.get(3).isBaseline()).isTrue();
+
+		// Check smali can be retrieved for all checkpoints
+		assertThat(historyManager.getSmaliAtCommit(classType, history.get(0).getFullHash())).isEqualTo("payment_patched");
+		assertThat(historyManager.getSmaliAtCommit(classType, history.get(1).getFullHash())).isEqualTo("payment_patched");
+		assertThat(historyManager.getSmaliAtCommit(classType, history.get(3).getFullHash())).isEqualTo("payment_base");
 	}
 
 	@Test

@@ -17,6 +17,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import jadx.gui.patching.history.PatchHistoryManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -703,6 +706,17 @@ public class ExportPatchedApkDialog extends CommonDialog {
 	}
 
 	private void showSuccessDialog(Path outputPath, boolean signed, String sizeStr, boolean isDex) {
+		try {
+			List<String> modifiedClasses = ModifiedDexManager.getInstance().getModifiedClasses().stream()
+					.map(ModifiedClass::getClassType)
+					.collect(Collectors.toList());
+			String exportType = isDex ? "Patched DEX" : "Patched APK";
+			PatchHistoryManager.getInstance().recordExportMilestone(
+					"Exported " + exportType + ": " + outputPath.getFileName(), modifiedClasses);
+		} catch (Exception e) {
+			LOG.error("Failed to record export milestone", e);
+		}
+
 		String msg = isDex
 				? String.format("Successfully exported patched DEX:\n%s\n\nSize: %s", outputPath.toAbsolutePath(), sizeStr)
 				: String.format("Successfully exported patched package:\n%s\n\nSize: %s\nSigned: %s",
