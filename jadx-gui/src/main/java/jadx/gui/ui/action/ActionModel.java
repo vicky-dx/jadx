@@ -42,7 +42,7 @@ public enum ActionModel {
 			keyboard(KeyEvent.VK_K, ctrlButton() | SHIFT_DOWN_MASK)),
 	QUICK_DEPLOY(MENU_TOOLBAR, NLS.str("file.quick_deploy"), null, "ui/run",
 			keyboard(KeyEvent.VK_R, ctrlButton() | SHIFT_DOWN_MASK)),
-	PATCH_TIMELINE(MENU_TOOLBAR, NLS.str("file.patch_timeline"), null, "ui/history",
+	PATCH_TIMELINE(MENU_TOOLBAR, NLS.str("file.patch_timeline"), null, null,
 			keyboard(KeyEvent.VK_H, ctrlButton() | SHIFT_DOWN_MASK)),
 	PREFS(MENU_TOOLBAR, NLS.str("menu.preferences"), null, "ui/settings", keyboard(KeyEvent.VK_P, ctrlButton() | SHIFT_DOWN_MASK)),
 	EXIT(MENU_TOOLBAR, NLS.str("file.exit"), null, "ui/exit", null),
