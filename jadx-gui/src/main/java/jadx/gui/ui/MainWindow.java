@@ -591,7 +591,7 @@ public class MainWindow extends JFrame {
 			UiUtils.resetClipboardOwner();
 			update();
 		});
-		if (wrapper != null) {
+		if (wrapper != null && wrapper.getCurrentDecompiler().isPresent()) {
 			try {
 				ICodeCache codeCache = wrapper.getArgs() != null ? wrapper.getArgs().getCodeCache() : null;
 				if (codeCache != null) {
