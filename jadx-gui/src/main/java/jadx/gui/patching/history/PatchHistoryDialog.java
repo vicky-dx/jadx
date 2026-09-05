@@ -235,9 +235,18 @@ public class PatchHistoryDialog extends CommonDialog {
 		}
 
 		String historicalSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, selected.getFullHash());
-		if (historicalSmali != null && onApplyCode != null) {
-			dispose();
-			onApplyCode.accept(historicalSmali);
+		if (historicalSmali != null) {
+			String normCurrent = (currentSmali != null) ? currentSmali.replace("\r\n", "\n").replace('\r', '\n') : "";
+			if (historicalSmali.equals(normCurrent)) {
+				JOptionPane.showMessageDialog(this,
+						"Current active code is already identical to checkpoint [" + selected.getShortHash() + "].\nNo rollback needed.",
+						"Rollback", JOptionPane.INFORMATION_MESSAGE);
+				return;
+			}
+			if (onApplyCode != null) {
+				dispose();
+				onApplyCode.accept(historicalSmali);
+			}
 		}
 	}
 }
