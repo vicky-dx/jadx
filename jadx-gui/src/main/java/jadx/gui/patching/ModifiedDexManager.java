@@ -91,18 +91,33 @@ public class ModifiedDexManager {
 
 	/**
 	 * Unregisters a modified class when reverted back to baseline original state.
+	 * Handles both descriptor format (Lpkg/Name;) and dotted format (pkg.Name).
 	 */
 	public synchronized void unregisterModifiedClass(String classType) {
 		if (classType == null) {
 			return;
 		}
+		String clean = classType.trim();
+		String descType;
+		String dottedType;
+		if (clean.startsWith("L") && clean.endsWith(";")) {
+			descType = clean;
+			dottedType = clean.substring(1, clean.length() - 1).replace('/', '.');
+		} else {
+			dottedType = clean;
+			descType = "L" + clean.replace('.', '/') + ";";
+		}
 		for (Map<String, ModifiedClass> map : modifiedClassesByDex.values()) {
-			map.remove(classType);
+			map.remove(descType);
+			map.remove(dottedType);
+			map.remove(clean);
 		}
 		for (Map<String, ModifiedClass> map : modifiedClassesBySourceApk.values()) {
-			map.remove(classType);
+			map.remove(descType);
+			map.remove(dottedType);
+			map.remove(clean);
 		}
-		LOG.info("Unregistered class '{}' (reverted to baseline).", classType);
+		LOG.info("Unregistered class '{}' (desc='{}') - reverted to baseline.", classType, descType);
 	}
 
 	// ─────────────────────────── Query helpers ───────────────────────────

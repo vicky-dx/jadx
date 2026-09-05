@@ -224,7 +224,9 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			List<ClassNode> reloadedTopClasses = new ArrayList<>();
 			String finalTargetDexName = targetDexName;
 			String baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classFullName);
-			boolean isBaseline = baselineCode != null && baselineCode.equals(smaliCode);
+			String normSmali = smaliCode.replace("\r\n", "\n").replace('\r', '\n').trim();
+			String normBaseline = (baselineCode != null) ? baselineCode.replace("\r\n", "\n").replace('\r', '\n').trim() : null;
+			boolean isBaseline = normBaseline != null && normBaseline.equals(normSmali);
 
 			codeLoader.visitClasses(newClsData -> {
 				String rawType = newClsData.getType();
@@ -238,6 +240,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					clsNode.setInputFileName(origDex);
 					if (isBaseline) {
 						ModifiedDexManager.getInstance().unregisterModifiedClass(rawType);
+						ModifiedDexManager.getInstance().unregisterModifiedClass(classFullName);
 					} else {
 						ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
 					}
