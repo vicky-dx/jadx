@@ -97,9 +97,18 @@ public final class AdbDeployer {
 			if (line.isEmpty() || line.startsWith("List of devices")) {
 				continue;
 			}
-			String[] parts = line.split("\\s+");
-			if (parts.length >= 2) {
-				devices.add(new Device(parts[0], parts[1]));
+			int tabIdx = line.indexOf('\t');
+			if (tabIdx != -1) {
+				String serial = line.substring(0, tabIdx).trim();
+				String state = line.substring(tabIdx + 1).trim().split("\\s+")[0];
+				if (!serial.isEmpty() && !state.isEmpty()) {
+					devices.add(new Device(serial, state));
+				}
+			} else {
+				String[] parts = line.split("\\s+");
+				if (parts.length >= 2) {
+					devices.add(new Device(parts[0], parts[1]));
+				}
 			}
 		}
 		LOG.info("[ADB] Found {} device(s): {}", devices.size(), devices);
@@ -116,7 +125,7 @@ public final class AdbDeployer {
 	public DeployResult deployApk(Path apkPath, String deviceSerial) {
 		LOG.info("[ADB] Installing APK: {} on device: {}", apkPath, deviceSerial);
 		try {
-			String installOutput = runAdb("-s", deviceSerial, "install", "-r", "-d",
+			String installOutput = runAdb("-s", deviceSerial, "install", "-r", "-d", "-t",
 					apkPath.toAbsolutePath().toString());
 			LOG.info("[ADB] install output: {}", installOutput);
 
@@ -155,7 +164,7 @@ public final class AdbDeployer {
 		LOG.info("[ADB] Force-reinstalling {} on {}", packageName, deviceSerial);
 		try {
 			runAdb("-s", deviceSerial, "uninstall", packageName);
-			String installOutput = runAdb("-s", deviceSerial, "install", "-r", "-d",
+			String installOutput = runAdb("-s", deviceSerial, "install", "-r", "-d", "-t",
 					apkPath.toAbsolutePath().toString());
 			if (!installOutput.contains("Success")) {
 				LOG.error("[ADB] Force-reinstall failed:\n{}", installOutput);
@@ -257,18 +266,31 @@ public final class AdbDeployer {
 		return output;
 	}
 
-	/** Resolves the ADB binary path from ANDROID_HOME or PATH. */
-	private static String resolveAdb() {
-		String androidHome = System.getenv("ANDROID_HOME");
-		if (androidHome != null && !androidHome.isEmpty()) {
-			String os = System.getProperty("os.name", "").toLowerCase();
-			String suffix = os.contains("win") ? "adb.exe" : "adb";
-			java.io.File adb = new java.io.File(androidHome,
-					"platform-tools" + java.io.File.separator + suffix);
-			if (adb.exists()) {
-				return adb.getAbsolutePath();
+	/** Resolves the ADB binary path with precedence: customPath > ANDROID_HOME / ANDROID_SDK_ROOT > PATH. */
+	public static String resolveAdb(@Nullable String customPath) {
+		if (customPath != null && !customPath.trim().isEmpty()) {
+			java.io.File custom = new java.io.File(customPath.trim());
+			if (custom.exists()) {
+				return custom.getAbsolutePath();
+			}
+		}
+		String[] envVars = { "ANDROID_HOME", "ANDROID_SDK_ROOT" };
+		String os = System.getProperty("os.name", "").toLowerCase();
+		String suffix = os.contains("win") ? "adb.exe" : "adb";
+		for (String env : envVars) {
+			String sdkPath = System.getenv(env);
+			if (sdkPath != null && !sdkPath.isEmpty()) {
+				java.io.File adb = new java.io.File(sdkPath,
+						"platform-tools" + java.io.File.separator + suffix);
+				if (adb.exists()) {
+					return adb.getAbsolutePath();
+				}
 			}
 		}
 		return "adb"; // rely on PATH
+	}
+
+	private static String resolveAdb() {
+		return resolveAdb(null);
 	}
 }

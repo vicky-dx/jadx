@@ -58,10 +58,12 @@ public class QuickDeployDialog extends CommonDialog {
 	private final JButton cancelBtn = new JButton("Cancel");
 
 	private List<AdbDeployer.Device> devices = Collections.emptyList();
-	private final AdbDeployer deployer = new AdbDeployer();
+	private final AdbDeployer deployer;
 
 	public QuickDeployDialog(MainWindow mainWindow) {
 		super(mainWindow);
+		String configuredAdb = mainWindow.getSettings().getAdbDialogPath();
+		this.deployer = new AdbDeployer(AdbDeployer.resolveAdb(configuredAdb));
 		initUI();
 		refreshDevices();
 	}

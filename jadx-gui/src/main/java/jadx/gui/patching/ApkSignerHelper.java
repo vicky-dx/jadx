@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.KeyStore;
 import java.security.PrivateKey;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -107,12 +109,24 @@ public class ApkSignerHelper {
 				throw new IllegalStateException("Private key not found for alias: " + targetAlias);
 			}
 
-			X509Certificate certificate = (X509Certificate) keyStore.getCertificate(targetAlias);
-			if (certificate == null) {
-				throw new IllegalStateException("Certificate not found for alias: " + targetAlias);
+			Certificate[] chain = keyStore.getCertificateChain(targetAlias);
+			List<X509Certificate> certificates = new ArrayList<>();
+			if (chain != null && chain.length > 0) {
+				for (Certificate cert : chain) {
+					if (cert instanceof X509Certificate) {
+						certificates.add((X509Certificate) cert);
+					}
+				}
+			}
+			if (certificates.isEmpty()) {
+				X509Certificate certificate = (X509Certificate) keyStore.getCertificate(targetAlias);
+				if (certificate == null) {
+					throw new IllegalStateException("Certificate not found for alias: " + targetAlias);
+				}
+				certificates.add(certificate);
 			}
 
-			return new ApkSigner.SignerConfig.Builder(targetAlias, privateKey, Collections.singletonList(certificate)).build();
+			return new ApkSigner.SignerConfig.Builder(targetAlias, privateKey, certificates).build();
 		} catch (Exception e) {
 			throw new JadxRuntimeException("Failed to load keystore '" + keystorePath + "': " + e.getMessage(), e);
 		} finally {
@@ -126,10 +140,39 @@ public class ApkSignerHelper {
 		}
 	}
 
+	private static final int DEFAULT_MIN_SDK = 21;
+
+	/**
+	 * Extracts minSdkVersion from APK's binary AndroidManifest.xml, falling back to 21 if unavailable.
+	 */
+	public static int resolveMinSdkVersion(Path apkPath) {
+		try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(apkPath.toFile())) {
+			java.util.zip.ZipEntry entry = zip.getEntry("AndroidManifest.xml");
+			if (entry != null) {
+				try (InputStream in = zip.getInputStream(entry)) {
+					byte[] manifestBytes = in.readAllBytes();
+					return com.android.apksig.apk.ApkUtils.getMinSdkVersionFromBinaryAndroidManifest(
+							java.nio.ByteBuffer.wrap(manifestBytes));
+				}
+			}
+		} catch (Exception e) {
+			LOG.debug("Could not determine minSdkVersion from manifest of {}, defaulting to {}", apkPath, DEFAULT_MIN_SDK, e);
+		}
+		return DEFAULT_MIN_SDK;
+	}
+
 	/**
 	 * Signs the input APK and outputs a signed, verified APK with v1, v2, and v3 schemes.
+	 * Automatically infers minSdkVersion from the APK manifest, falling back to 21.
 	 */
 	public static void sign(Path inputApk, Path outputApk, List<ApkSigner.SignerConfig> signerConfigs) {
+		sign(inputApk, outputApk, signerConfigs, resolveMinSdkVersion(inputApk));
+	}
+
+	/**
+	 * Signs the input APK with a specific minSdkVersion.
+	 */
+	public static void sign(Path inputApk, Path outputApk, List<ApkSigner.SignerConfig> signerConfigs, int minSdkVersion) {
 		if (!Files.exists(inputApk)) {
 			throw new IllegalArgumentException("Input APK file does not exist: " + inputApk);
 		}
@@ -145,7 +188,7 @@ public class ApkSignerHelper {
 			ApkSigner.Builder builder = new ApkSigner.Builder(signerConfigs)
 					.setInputApk(inputApk.toFile())
 					.setOutputApk(outputApk.toFile())
-					.setMinSdkVersion(21)
+					.setMinSdkVersion(minSdkVersion)
 					.setV1SigningEnabled(true)
 					.setV2SigningEnabled(true)
 					.setV3SigningEnabled(true)
@@ -153,7 +196,7 @@ public class ApkSignerHelper {
 					.setCreatedBy("JADX Patched");
 
 			builder.build().sign();
-			LOG.info("Successfully signed APK with v1, v2, v3 schemes: {}", outputApk);
+			LOG.info("Successfully signed APK with v1, v2, v3 schemes (minSdk {}): {}", minSdkVersion, outputApk);
 		} catch (Exception e) {
 			throw new JadxRuntimeException("Failed to sign APK: " + e.getMessage(), e);
 		}

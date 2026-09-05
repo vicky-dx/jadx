@@ -276,10 +276,10 @@ public class ADB {
 		return rst;
 	}
 
-	private static final Pattern SERIAL_PATTERN = Pattern.compile("^[\\w-]{8,20}$");
+	private static final Pattern SERIAL_PATTERN = Pattern.compile("^[a-zA-Z0-9_.:\\[\\]() -]{1,128}$");
 
 	private static void checkSerial(String serial) {
-		if (!SERIAL_PATTERN.matcher(serial).matches()) {
+		if (serial == null || !SERIAL_PATTERN.matcher(serial).matches()) {
 			throw new IllegalArgumentException("Invalid serial: " + serial);
 		}
 	}

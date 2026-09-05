@@ -82,4 +82,17 @@ public class ApkSignerHelperTest {
 				.as("v3 signature should be present")
 				.isTrue();
 	}
+
+	@Test
+	public void testResolveMinSdkVersionFallback(@TempDir Path tempDir) throws Exception {
+		Path dummyApk = tempDir.resolve("dummy.apk");
+		try (ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(dummyApk)))) {
+			ZipEntry manifestEntry = new ZipEntry("AndroidManifest.xml");
+			zos.putNextEntry(manifestEntry);
+			zos.write("plain-text".getBytes());
+			zos.closeEntry();
+		}
+		int minSdk = ApkSignerHelper.resolveMinSdkVersion(dummyApk);
+		assertThat(minSdk).isEqualTo(21);
+	}
 }

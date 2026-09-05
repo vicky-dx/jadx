@@ -23,29 +23,53 @@ public class ADBDeviceInfo {
 	private final Map<String, String> propertiesMap = new TreeMap<>();
 
 	ADBDeviceInfo(String info, String host, int port) {
-		String[] infoFields = info.trim().split("\\s+");
-		allInfo = String.join(" ", infoFields);
-		if (infoFields.length > 2) {
-			serial = infoFields[0];
-			state = infoFields[1];
-
-			for (int i = 2; i < infoFields.length; i++) {
-				String field = infoFields[i];
-				int idx = field.indexOf(':');
-				if (idx > 0) {
-					String key = field.substring(0, idx);
-					String value = field.substring(idx + 1);
-					if (!value.isEmpty()) {
-						propertiesMap.put(key, value);
+		String trimmed = info.trim();
+		allInfo = trimmed;
+		int tabIdx = trimmed.indexOf('\t');
+		if (tabIdx != -1) {
+			serial = trimmed.substring(0, tabIdx).trim();
+			String rest = trimmed.substring(tabIdx + 1).trim();
+			String[] restFields = rest.split("\\s+");
+			if (restFields.length > 0 && !restFields[0].isEmpty()) {
+				state = restFields[0];
+				for (int i = 1; i < restFields.length; i++) {
+					String field = restFields[i];
+					int idx = field.indexOf(':');
+					if (idx > 0) {
+						String key = field.substring(0, idx);
+						String value = field.substring(idx + 1);
+						if (!value.isEmpty()) {
+							propertiesMap.put(key, value);
+						}
 					}
 				}
+			} else {
+				state = "unknown";
 			}
 			model = propertiesMap.getOrDefault("model", serial);
 		} else {
-			LOG.error("Unable to extract device information from {}", LogUtils.escape(info));
-			serial = "";
-			state = "unknown";
-			model = "unknown";
+			String[] infoFields = trimmed.split("\\s+");
+			if (infoFields.length >= 2) {
+				serial = infoFields[0];
+				state = infoFields[1];
+				for (int i = 2; i < infoFields.length; i++) {
+					String field = infoFields[i];
+					int idx = field.indexOf(':');
+					if (idx > 0) {
+						String key = field.substring(0, idx);
+						String value = field.substring(idx + 1);
+						if (!value.isEmpty()) {
+							propertiesMap.put(key, value);
+						}
+					}
+				}
+				model = propertiesMap.getOrDefault("model", serial);
+			} else {
+				LOG.error("Unable to extract device information from {}", LogUtils.escape(info));
+				serial = "";
+				state = "unknown";
+				model = "unknown";
+			}
 		}
 		adbHost = host;
 		adbPort = port;

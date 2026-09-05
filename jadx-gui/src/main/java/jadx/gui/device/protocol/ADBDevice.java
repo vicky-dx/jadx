@@ -111,11 +111,20 @@ public class ADBDevice {
 			}
 		}
 		String rst = new String(res, ADB_CHARSET).trim();
-		if (rst.startsWith("Starting: Intent {") && rst.endsWith(fullAppName + " }")) {
-			Thread.sleep(40);
+		if (rst.contains("Error:") || rst.contains("Exception") || rst.contains("does not exist")) {
+			LOG.error("Failed to launch app {}: {}", fullAppName, rst);
+			return -1;
+		}
+		if (rst.contains("Starting: Intent {") || rst.contains("Warning:") || rst.contains("Status: ok")) {
 			String pkg = fullAppName.split("/")[0];
-			for (Process process : getProcessByPkg(pkg)) {
-				return Integer.parseInt(process.pid);
+			for (int attempt = 0; attempt < 15; attempt++) {
+				Thread.sleep(100);
+				for (Process process : getProcessByPkg(pkg)) {
+					try {
+						return Integer.parseInt(process.pid);
+					} catch (NumberFormatException ignored) {
+					}
+				}
 			}
 		}
 		return -1;
@@ -213,11 +222,22 @@ public class ADBDevice {
 	}
 
 	public List<Process> getProcessByPkg(String pkg) throws IOException {
-		return getProcessList("ps | grep " + pkg);
+		List<Process> procs = getProcessList();
+		List<Process> matched = new ArrayList<>();
+		for (Process p : procs) {
+			if (p.name != null && (p.name.equals(pkg) || p.name.startsWith(pkg + ":") || p.name.contains(pkg))) {
+				matched.add(p);
+			}
+		}
+		return matched;
 	}
 
 	public List<Process> getProcessList() throws IOException {
-		return getProcessList("ps");
+		List<Process> procs = getProcessList("ps -A");
+		if (procs.isEmpty()) {
+			return getProcessList("ps");
+		}
+		return procs;
 	}
 
 	private List<Process> getProcessList(String cmd) throws IOException {
