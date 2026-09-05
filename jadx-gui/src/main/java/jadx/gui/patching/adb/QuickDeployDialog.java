@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -28,9 +29,11 @@ import org.slf4j.LoggerFactory;
 import com.android.apksig.ApkSigner;
 
 import jadx.gui.patching.ApkSignerHelper;
+import jadx.gui.patching.ModifiedClass;
 import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.patching.PackageTypeDetector;
 import jadx.gui.patching.PackageTypeDetector.PackageType;
+import jadx.gui.patching.history.PatchHistoryManager;
 import jadx.gui.patching.ZipAligner;
 import jadx.gui.patching.merger.ApkEditorBackend;
 import jadx.gui.ui.MainWindow;
@@ -247,6 +250,12 @@ public class QuickDeployDialog extends CommonDialog {
 			Files.deleteIfExists(alignedTemp);
 
 			// 6. ADB install
+			PatchHistoryManager.getInstance().recordDeployMilestone(
+					"Deploy to " + device.getSerial(),
+					ModifiedDexManager.getInstance().getModifiedClasses().stream()
+							.map(ModifiedClass::getClassType)
+							.collect(Collectors.toList()));
+
 			setStatus("Installing on device: " + device.getSerial() + "...");
 			final Path finalTempApk = tempApk;
 			AdbDeployer.DeployResult result = deployer.deployApk(tempApk, device.getSerial());

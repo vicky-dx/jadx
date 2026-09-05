@@ -138,8 +138,10 @@ import jadx.gui.ui.action.ActionModel;
 import jadx.gui.ui.action.JadxGuiAction;
 import jadx.gui.ui.codearea.AbstractCodeArea;
 import jadx.gui.ui.codearea.AbstractCodeContentPanel;
+import jadx.gui.ui.codearea.ClassCodeContentPanel;
 import jadx.gui.ui.codearea.EditorViewState;
 import jadx.gui.ui.codearea.theme.EditorThemeManager;
+import jadx.gui.ui.panel.ContentPanel;
 import jadx.gui.ui.dialog.ADBDialog;
 import jadx.gui.ui.dialog.AboutDialog;
 import jadx.gui.ui.dialog.CharsetDialog;
@@ -612,6 +614,12 @@ public class MainWindow extends JFrame {
 		wrapper.close();
 		LogCollector.getInstance().reset();
 		resetCache();
+		if (ModifiedDexManager.getInstance().hasModifications()) {
+			jadx.gui.patching.history.PatchHistoryManager.getInstance().recordReloadSnapshot(
+					ModifiedDexManager.getInstance().getModifiedClasses().stream()
+							.map(jadx.gui.patching.ModifiedClass::getClassType)
+							.collect(java.util.stream.Collectors.toList()));
+		}
 		ModifiedDexManager.getInstance().clear();
 		notifyLoadListeners(false);
 	}
@@ -867,6 +875,15 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		new jadx.gui.patching.adb.QuickDeployDialog(this).setVisible(true);
+	}
+
+	public void openPatchTimeline() {
+		ContentPanel selectedContentPanel = tabbedPane.getSelectedContentPanel();
+		if (selectedContentPanel instanceof ClassCodeContentPanel) {
+			((ClassCodeContentPanel) selectedContentPanel).showPatchHistory();
+		} else {
+			UiUtils.showMessageBox(this, "Please open a class in Smali view to inspect its patch history.");
+		}
 	}
 
 	public void initTree() {
@@ -1169,6 +1186,7 @@ public class MainWindow extends JFrame {
 		JadxGuiAction exportAction = new JadxGuiAction(ActionModel.EXPORT, this::exportProject);
 		JadxGuiAction exportPatchedApkAction = new JadxGuiAction(ActionModel.EXPORT_PATCHED_APK, this::openExportPatchedApkDialog);
 		JadxGuiAction quickDeployAction = new JadxGuiAction(ActionModel.QUICK_DEPLOY, this::openQuickDeploy);
+		JadxGuiAction patchTimelineAction = new JadxGuiAction(ActionModel.PATCH_TIMELINE, this::openPatchTimeline);
 
 		JMenu recentProjects = new JadxMenu(NLS.str("menu.recent_projects"), shortcutsController);
 		recentProjects.addMenuListener(new RecentProjectsMenuListener(this, recentProjects));
@@ -1269,6 +1287,7 @@ public class MainWindow extends JFrame {
 		file.add(exportAction);
 		file.add(exportPatchedApkAction);
 		file.add(quickDeployAction);
+		file.add(patchTimelineAction);
 		file.addSeparator();
 		file.add(recentProjects);
 		file.addSeparator();
@@ -1369,6 +1388,7 @@ public class MainWindow extends JFrame {
 		toolbar.add(exportAction);
 		toolbar.add(exportPatchedApkAction);
 		toolbar.add(quickDeployAction);
+		toolbar.add(patchTimelineAction);
 		toolbar.addSeparator();
 		toolbar.add(syncAction);
 		toolbar.add(flatPkgButton);
@@ -1419,6 +1439,7 @@ public class MainWindow extends JFrame {
 			exportAction.setEnabled(loaded);
 			exportPatchedApkAction.setEnabled(loaded);
 			quickDeployAction.setEnabled(loaded);
+			patchTimelineAction.setEnabled(loaded);
 			saveProjectAsAction.setEnabled(loaded);
 			reloadAction.setEnabled(loaded);
 			decompileAllAction.setEnabled(loaded);

@@ -48,6 +48,10 @@ import jadx.gui.device.debugger.DbgUtils;
 import jadx.gui.jobs.IBackgroundTask;
 import jadx.gui.jobs.LoadTask;
 import jadx.gui.patching.ModifiedDexManager;
+import jadx.gui.patching.history.PatchCommit;
+import jadx.gui.patching.history.PatchDiffDialog;
+import jadx.gui.patching.history.PatchHistoryDialog;
+import jadx.gui.patching.history.PatchHistoryManager;
 import jadx.gui.treemodel.JClass;
 import jadx.gui.treemodel.JNode;
 import jadx.gui.treemodel.TextNode;
@@ -89,6 +93,16 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					applySmali();
 				}
 			});
+
+			KeyStroke rollbackKey = KeyStroke.getKeyStroke(KeyEvent.VK_Z, UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK);
+			UiUtils.addKeyBinding(this, rollbackKey, "RollbackSmaliAction", new AbstractAction() {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					rollbackPreviousEdit();
+				}
+			});
 		}
 		setUnLoaded();
 		load();
@@ -102,7 +116,29 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			applyItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton()));
 			applyItem.addActionListener(e -> applySmali());
 			popup.add(applyItem, 0);
-			popup.add(new JPopupMenu.Separator(), 1);
+
+			JMenuItem rollbackItem = new JMenuItem("⏪ Rollback to Previous Edit");
+			rollbackItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK));
+			rollbackItem.addActionListener(e -> rollbackPreviousEdit());
+			popup.add(rollbackItem, 1);
+
+			JMenuItem diffPrevItem = new JMenuItem("🔍 Compare with Previous Edit");
+			diffPrevItem.addActionListener(e -> showDiffWithPrevious());
+			popup.add(diffPrevItem, 2);
+
+			JMenuItem diffOrigItem = new JMenuItem("🔍 Compare with Original APK");
+			diffOrigItem.addActionListener(e -> showDiffWithOriginal());
+			popup.add(diffOrigItem, 3);
+
+			JMenuItem revertItem = new JMenuItem("🔄 Revert to Original APK State");
+			revertItem.addActionListener(e -> revertToBaseline());
+			popup.add(revertItem, 4);
+
+			JMenuItem historyItem = new JMenuItem("📜 Patch Timeline & History...");
+			historyItem.addActionListener(e -> showPatchHistory());
+			popup.add(historyItem, 5);
+
+			popup.add(new JPopupMenu.Separator(), 6);
 		}
 		return popup;
 	}
@@ -115,6 +151,9 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					model.loadUI(code);
 					setCaretPosition(0);
 					setLoaded();
+					if (!isShowingDalvikBytecode() && code != null && getJClass() != null) {
+						PatchHistoryManager.getInstance().recordBaseline(getJClass().getFullName(), code);
+					}
 				});
 	}
 
@@ -204,6 +243,8 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				((ClassCodeContentPanel) contentPanel).refreshJavaViews();
 			}
 
+			PatchHistoryManager.getInstance().recordEdit(getJClass().getFullName(), smaliCode, "Modified " + getJClass().getFullName());
+
 			JOptionPane.showMessageDialog(contentPanel.getMainWindow(),
 					"✓ Smali applied & Java code updated successfully!\n(Generated DEX: " + dexBytes.length + " bytes)",
 					"Apply Smali Success",
@@ -218,6 +259,89 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					JOptionPane.ERROR_MESSAGE);
 			return false;
 		}
+	}
+
+	public boolean rollbackPreviousEdit() {
+		if (isShowingDalvikBytecode()) {
+			return false;
+		}
+		String classType = getJClass().getFullName();
+		String prevCode = PatchHistoryManager.getInstance().getHistoricalSmali(classType, 1);
+		if (prevCode == null) {
+			JOptionPane.showMessageDialog(this, "No previous checkpoint found for " + classType, "Rollback", JOptionPane.INFORMATION_MESSAGE);
+			return false;
+		}
+		setText(prevCode);
+		setCaretPosition(0);
+		return applySmali();
+	}
+
+	public boolean revertToBaseline() {
+		if (isShowingDalvikBytecode()) {
+			return false;
+		}
+		String classType = getJClass().getFullName();
+		int confirm = JOptionPane.showConfirmDialog(this,
+				"Revert " + classType + " back to original APK state?",
+				"Revert to Baseline", JOptionPane.YES_NO_OPTION);
+		if (confirm != JOptionPane.YES_OPTION) {
+			return false;
+		}
+		String baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classType);
+		if (baselineCode == null) {
+			JOptionPane.showMessageDialog(this, "No original baseline found for " + classType, "Revert", JOptionPane.INFORMATION_MESSAGE);
+			return false;
+		}
+		setText(baselineCode);
+		setCaretPosition(0);
+		return applySmali();
+	}
+
+	public void showDiffWithPrevious() {
+		String classType = getJClass().getFullName();
+		String prevCode = PatchHistoryManager.getInstance().getHistoricalSmali(classType, 1);
+		if (prevCode == null) {
+			JOptionPane.showMessageDialog(this, "No previous checkpoint to compare with.", "Diff", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		PatchDiffDialog dlg = new PatchDiffDialog(
+				contentPanel.getMainWindow(), classType,
+				"Diff: Previous vs Current — " + classType,
+				prevCode, "Previous Checkpoint",
+				getText(), "Current Active Code",
+				this::rollbackPreviousEdit
+		);
+		dlg.setVisible(true);
+	}
+
+	public void showDiffWithOriginal() {
+		String classType = getJClass().getFullName();
+		String baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classType);
+		if (baselineCode == null) {
+			JOptionPane.showMessageDialog(this, "No original baseline to compare with.", "Diff", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		PatchDiffDialog dlg = new PatchDiffDialog(
+				contentPanel.getMainWindow(), classType,
+				"Diff: Original APK vs Current — " + classType,
+				baselineCode, "Original APK Baseline",
+				getText(), "Current Active Code",
+				this::revertToBaseline
+		);
+		dlg.setVisible(true);
+	}
+
+	public void showPatchHistory() {
+		String classType = getJClass().getFullName();
+		PatchHistoryDialog dlg = new PatchHistoryDialog(
+				contentPanel.getMainWindow(), classType, getText(),
+				historicalCode -> {
+					setText(historicalCode);
+					setCaretPosition(0);
+					applySmali();
+				}
+		);
+		dlg.setVisible(true);
 	}
 
 	@Override

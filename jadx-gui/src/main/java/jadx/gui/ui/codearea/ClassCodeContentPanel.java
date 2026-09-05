@@ -330,4 +330,10 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 			}
 		}
 	}
+
+	public void showPatchHistory() {
+		if (smaliCodePanel != null && smaliCodePanel.getCodeArea() instanceof SmaliArea) {
+			((SmaliArea) smaliCodePanel.getCodeArea()).showPatchHistory();
+		}
+	}
 }

@@ -22,6 +22,7 @@ dependencies {
 	implementation(project(":jadx-plugins:jadx-dex-input"))
 
 	implementation(libs.jcommander)
+	implementation(libs.jgit)
 	implementation(libs.logback.classic)
 	implementation(libs.oshai.kotlin.logging.jvm)
 
