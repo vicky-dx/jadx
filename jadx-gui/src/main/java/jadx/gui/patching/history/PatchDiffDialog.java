@@ -67,8 +67,8 @@ public class PatchDiffDialog extends CommonDialog {
 			Runnable onRevert) {
 		super(mainWindow);
 		this.classType = classType;
-		this.leftContent = leftContent != null ? leftContent : "";
-		this.rightContent = rightContent != null ? rightContent : "";
+		this.leftContent = normalizeLineEndings(leftContent);
+		this.rightContent = normalizeLineEndings(rightContent);
 		this.leftTitle = leftTitle != null ? leftTitle : "Historical Version";
 		this.rightTitle = rightTitle != null ? rightTitle : "Current Active Version";
 		this.onRevert = onRevert;
@@ -76,6 +76,13 @@ public class PatchDiffDialog extends CommonDialog {
 		setTitle(title != null ? title : "Patch Diff — " + classType);
 		initUI();
 		computeAndApplyDiff();
+	}
+
+	private static String normalizeLineEndings(String s) {
+		if (s == null) {
+			return "";
+		}
+		return s.replace("\r\n", "\n").replace('\r', '\n');
 	}
 
 	private void initUI() {
@@ -259,8 +266,8 @@ public class PatchDiffDialog extends CommonDialog {
 						highlightRange(rightArea, edit.getBeginB(), edit.getEndB(), addColor);
 						break;
 					case REPLACE:
-						highlightRange(leftArea, edit.getBeginA(), edit.getEndA(), modOldColor);
-						highlightRange(rightArea, edit.getBeginB(), edit.getEndB(), modNewColor);
+						highlightRange(leftArea, edit.getBeginA(), edit.getEndA(), delColor);
+						highlightRange(rightArea, edit.getBeginB(), edit.getEndB(), addColor);
 						break;
 					default:
 						break;

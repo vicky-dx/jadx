@@ -300,7 +300,8 @@ public class PatchHistoryManager {
 					if (treeWalk != null) {
 						ObjectId blobId = treeWalk.getObjectId(0);
 						ObjectLoader loader = repo.open(blobId);
-						return new String(loader.getBytes(), StandardCharsets.UTF_8);
+						String content = new String(loader.getBytes(), StandardCharsets.UTF_8);
+						return content.replace("\r\n", "\n").replace('\r', '\n');
 					}
 				}
 			}
@@ -391,7 +392,8 @@ public class PatchHistoryManager {
 		if (target.getParent() != null) {
 			Files.createDirectories(target.getParent());
 		}
-		Files.write(target, content.getBytes(StandardCharsets.UTF_8));
+		String normalized = content != null ? content.replace("\r\n", "\n").replace('\r', '\n') : "";
+		Files.write(target, normalized.getBytes(StandardCharsets.UTF_8));
 	}
 
 	private void deleteRecursively(File file) {
