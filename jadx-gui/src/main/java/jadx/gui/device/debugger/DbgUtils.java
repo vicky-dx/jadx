@@ -38,6 +38,20 @@ public class DbgUtils {
 				c -> Smali.disassemble(topCls));
 	}
 
+	public static synchronized void clearSmaliCache(@Nullable ClassInfo classInfo) {
+		if (smaliCache != null && smaliCache != Collections.EMPTY_MAP) {
+			if (classInfo != null) {
+				smaliCache.remove(classInfo);
+			} else {
+				smaliCache.clear();
+			}
+		}
+	}
+
+	public static synchronized void clearSmaliCache() {
+		clearSmaliCache(null);
+	}
+
 	public static String getSmaliCode(ClassNode topCls) {
 		Smali smali = getSmali(topCls);
 		if (smali != null) {

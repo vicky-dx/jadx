@@ -89,6 +89,22 @@ public class ModifiedDexManager {
 				classType, targetDex, sourceApkName != null ? sourceApkName : "<standalone>");
 	}
 
+	/**
+	 * Unregisters a modified class when reverted back to baseline original state.
+	 */
+	public synchronized void unregisterModifiedClass(String classType) {
+		if (classType == null) {
+			return;
+		}
+		for (Map<String, ModifiedClass> map : modifiedClassesByDex.values()) {
+			map.remove(classType);
+		}
+		for (Map<String, ModifiedClass> map : modifiedClassesBySourceApk.values()) {
+			map.remove(classType);
+		}
+		LOG.info("Unregistered class '{}' (reverted to baseline).", classType);
+	}
+
 	// ─────────────────────────── Query helpers ───────────────────────────
 
 	/** Returns the total number of modified classes in this session. */

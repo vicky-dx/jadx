@@ -156,15 +156,46 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 			leftSelected.getCodeArea().refresh();
 			leftSelected.load();
 		}
+		if (smaliCodePanel != null && smaliCodePanel != leftSelected) {
+			smaliCodePanel.getCodeArea().refresh();
+		}
 		if (rightTabbedPane != null) {
 			CodePanel rightSelected = getCodePanel(rightTabbedPane);
-			if (rightSelected != null && rightSelected.getCodeArea() instanceof CodeArea) {
+			if (rightSelected != null && rightSelected.getCodeArea() != null) {
 				rightSelected.getCodeArea().refresh();
 				rightSelected.load();
 			}
 		}
 		revalidate();
 		repaint();
+	}
+
+	public void updateSmaliAreas(String newCode) {
+		updateSmaliInTabbedPane(leftTabbedPane, newCode);
+		updateSmaliInTabbedPane(rightTabbedPane, newCode);
+		revalidate();
+		repaint();
+	}
+
+	private void updateSmaliInTabbedPane(JTabbedPane pane, String newCode) {
+		if (pane == null) {
+			return;
+		}
+		for (Component comp : pane.getComponents()) {
+			if (comp instanceof CodePanel) {
+				AbstractCodeArea area = ((CodePanel) comp).getCodeArea();
+				if (area instanceof SmaliArea) {
+					SmaliArea smaliArea = (SmaliArea) area;
+					if (!smaliArea.isShowingDalvikBytecode()) {
+						smaliArea.setText(newCode);
+						smaliArea.setCaretPosition(0);
+						smaliArea.setLoaded();
+					} else {
+						smaliArea.refresh();
+					}
+				}
+			}
+		}
 	}
 
 	private void updateSync() {

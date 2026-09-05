@@ -164,6 +164,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 	@Override
 	public void refresh() {
+		setUnLoaded();
 		load();
 	}
 
@@ -190,7 +191,10 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			JOptionPane.showMessageDialog(this, "Dalvik bytecode view is read-only.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
 			return false;
 		}
-		String smaliCode = getText();
+		return applySmaliCode(getText(), null);
+	}
+
+	public boolean applySmaliCode(String smaliCode, @org.jetbrains.annotations.Nullable String commitMsg) {
 		if (smaliCode == null || smaliCode.trim().isEmpty()) {
 			JOptionPane.showMessageDialog(this, "Smali code is empty.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
 			return false;
@@ -200,7 +204,8 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			if (dexBytes == null || dexBytes.length == 0) {
 				throw new JadxRuntimeException("Assembled DEX bytes are empty");
 			}
-			LOG.info("Smali assembled successfully for class {}, size: {} bytes", getJClass().getFullName(), dexBytes.length);
+			String classFullName = getJClass().getFullName();
+			LOG.info("Smali assembled successfully for class {}, size: {} bytes", classFullName, dexBytes.length);
 
 			// Phase 2: Inject modified bytecode into JADX decompilation context and trigger re-decompilation
 			ClassNode targetClassNode = getJClass().getCls().getClassNode();
@@ -215,6 +220,9 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 			List<ClassNode> reloadedTopClasses = new ArrayList<>();
 			String finalTargetDexName = targetDexName;
+			String baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classFullName);
+			boolean isBaseline = baselineCode != null && baselineCode.equals(smaliCode);
+
 			codeLoader.visitClasses(newClsData -> {
 				String rawType = newClsData.getType();
 				ClassNode clsNode = rootNode.resolveClass(ArgType.object(rawType));
@@ -225,7 +233,11 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					}
 					clsNode.updateClassData(newClsData);
 					clsNode.setInputFileName(origDex);
-					ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
+					if (isBaseline) {
+						ModifiedDexManager.getInstance().unregisterModifiedClass(rawType);
+					} else {
+						ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
+					}
 					ClassNode topParent = clsNode.getTopParentClass();
 					if (!reloadedTopClasses.contains(topParent)) {
 						reloadedTopClasses.add(topParent);
@@ -234,16 +246,20 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			});
 
 			for (ClassNode topCls : reloadedTopClasses) {
+				DbgUtils.clearSmaliCache(topCls.getClassInfo());
 				if (topCls.getJavaNode() != null) {
 					topCls.getJavaNode().reload();
 				}
 			}
 
 			if (contentPanel instanceof ClassCodeContentPanel) {
-				((ClassCodeContentPanel) contentPanel).refreshJavaViews();
+				ClassCodeContentPanel cPanel = (ClassCodeContentPanel) contentPanel;
+				cPanel.updateSmaliAreas(smaliCode);
+				cPanel.refreshJavaViews();
 			}
 
-			PatchHistoryManager.getInstance().recordEdit(getJClass().getFullName(), smaliCode, "Modified " + getJClass().getFullName());
+			String msg = commitMsg != null ? commitMsg : "Modified " + classFullName;
+			PatchHistoryManager.getInstance().recordEdit(classFullName, smaliCode, msg);
 
 			JOptionPane.showMessageDialog(contentPanel.getMainWindow(),
 					"✓ Smali applied & Java code updated successfully!\n(Generated DEX: " + dexBytes.length + " bytes)",
@@ -262,24 +278,16 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 	}
 
 	public boolean rollbackPreviousEdit() {
-		if (isShowingDalvikBytecode()) {
-			return false;
-		}
 		String classType = getJClass().getFullName();
 		String prevCode = PatchHistoryManager.getInstance().getHistoricalSmali(classType, 1);
 		if (prevCode == null) {
 			JOptionPane.showMessageDialog(this, "No previous checkpoint found for " + classType, "Rollback", JOptionPane.INFORMATION_MESSAGE);
 			return false;
 		}
-		setText(prevCode);
-		setCaretPosition(0);
-		return applySmali();
+		return applySmaliCode(prevCode, "Rollback " + classType);
 	}
 
 	public boolean revertToBaseline() {
-		if (isShowingDalvikBytecode()) {
-			return false;
-		}
 		String classType = getJClass().getFullName();
 		int confirm = JOptionPane.showConfirmDialog(this,
 				"Revert " + classType + " back to original APK state?",
@@ -292,9 +300,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			JOptionPane.showMessageDialog(this, "No original baseline found for " + classType, "Revert", JOptionPane.INFORMATION_MESSAGE);
 			return false;
 		}
-		setText(baselineCode);
-		setCaretPosition(0);
-		return applySmali();
+		return applySmaliCode(baselineCode, "Revert to baseline " + classType);
 	}
 
 	public void showDiffWithPrevious() {
@@ -336,9 +342,7 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 		PatchHistoryDialog dlg = new PatchHistoryDialog(
 				contentPanel.getMainWindow(), classType, getText(),
 				historicalCode -> {
-					setText(historicalCode);
-					setCaretPosition(0);
-					applySmali();
+					applySmaliCode(historicalCode, "Rollback " + classType);
 				}
 		);
 		dlg.setVisible(true);
