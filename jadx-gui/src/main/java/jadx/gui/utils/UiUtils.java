@@ -1,7 +1,10 @@
 package jadx.gui.utils;
 
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.Image;
 import java.awt.MouseInfo;
 import java.awt.Point;
@@ -26,10 +29,15 @@ import java.util.concurrent.Executors;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JLayeredPane;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
@@ -39,6 +47,7 @@ import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
 
 import org.intellij.lang.annotations.MagicConstant;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -564,5 +573,55 @@ public class UiUtils {
 
 	public static boolean nearlyEqual(float a, float b) {
 		return Math.abs(a - b) < 1E-6f;
+	}
+
+	public static void showToast(@Nullable Component parent, String message) {
+		SwingUtilities.invokeLater(() -> {
+			try {
+				if (parent == null) {
+					return;
+				}
+				JRootPane rootPane = SwingUtilities.getRootPane(parent);
+				if (rootPane == null) {
+					return;
+				}
+				JLayeredPane layeredPane = rootPane.getLayeredPane();
+				if (layeredPane == null) {
+					return;
+				}
+
+				JPanel toast = new JPanel(new BorderLayout());
+				toast.setOpaque(true);
+				toast.setBackground(new Color(35, 134, 54));
+				toast.setBorder(BorderFactory.createCompoundBorder(
+						BorderFactory.createLineBorder(new Color(46, 160, 67), 1, true),
+						BorderFactory.createEmptyBorder(6, 16, 6, 16)
+				));
+
+				JLabel label = new JLabel(message);
+				label.setForeground(Color.WHITE);
+				label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+				toast.add(label, BorderLayout.CENTER);
+
+				Dimension pref = toast.getPreferredSize();
+				int x = Math.max(10, rootPane.getWidth() - pref.width - 24);
+				int y = 24;
+				toast.setBounds(x, y, pref.width, pref.height);
+
+				layeredPane.add(toast, JLayeredPane.POPUP_LAYER);
+				layeredPane.revalidate();
+				layeredPane.repaint();
+
+				javax.swing.Timer timer = new javax.swing.Timer(2200, e -> {
+					layeredPane.remove(toast);
+					layeredPane.revalidate();
+					layeredPane.repaint();
+				});
+				timer.setRepeats(false);
+				timer.start();
+			} catch (Exception e) {
+				LOG.debug("Failed to show toast", e);
+			}
+		});
 	}
 }

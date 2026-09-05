@@ -10,10 +10,13 @@ import javax.swing.JCheckBox;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JToolBar;
+import javax.swing.JViewport;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.CaretListener;
 import javax.swing.text.JTextComponent;
+
+import jadx.gui.utils.CaretPositionFix;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -147,27 +150,26 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 	}
 
 	public void refreshJavaViews() {
-		if (javaCodePanel != null) {
-			javaCodePanel.getCodeArea().refresh();
-			javaCodePanel.load();
-		}
-		CodePanel leftSelected = getCodePanel(leftTabbedPane);
-		if (leftSelected != null && leftSelected != javaCodePanel) {
-			leftSelected.getCodeArea().refresh();
-			leftSelected.load();
-		}
-		if (smaliCodePanel != null && smaliCodePanel != leftSelected) {
-			smaliCodePanel.getCodeArea().refresh();
-		}
-		if (rightTabbedPane != null) {
-			CodePanel rightSelected = getCodePanel(rightTabbedPane);
-			if (rightSelected != null && rightSelected.getCodeArea() != null) {
-				rightSelected.getCodeArea().refresh();
-				rightSelected.load();
-			}
-		}
+		refreshJavaPanelsInTabbedPane(leftTabbedPane);
+		refreshJavaPanelsInTabbedPane(rightTabbedPane);
 		revalidate();
 		repaint();
+	}
+
+	private void refreshJavaPanelsInTabbedPane(@Nullable JTabbedPane pane) {
+		if (pane == null) {
+			return;
+		}
+		for (Component comp : pane.getComponents()) {
+			if (comp instanceof CodePanel) {
+				CodePanel panel = (CodePanel) comp;
+				if (panel.getCodeArea() instanceof CodeArea) {
+					CaretPositionFix caretFix = new CaretPositionFix(panel.getCodeArea());
+					caretFix.save();
+					panel.refresh(caretFix);
+				}
+			}
+		}
 	}
 
 	public void updateSmaliAreas(String newCode) {
@@ -177,7 +179,7 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 		repaint();
 	}
 
-	private void updateSmaliInTabbedPane(JTabbedPane pane, String newCode) {
+	private void updateSmaliInTabbedPane(@Nullable JTabbedPane pane, String newCode) {
 		if (pane == null) {
 			return;
 		}
@@ -187,11 +189,59 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 				if (area instanceof SmaliArea) {
 					SmaliArea smaliArea = (SmaliArea) area;
 					if (!smaliArea.isShowingDalvikBytecode()) {
-						smaliArea.setText(newCode);
-						smaliArea.setCaretPosition(0);
-						smaliArea.setLoaded();
+						String currentText = smaliArea.getText();
+						if (currentText.equals(newCode)) {
+							// Active editing area where user typed:
+							// Do not call setText() to avoid wiping undo history and resetting caret/scroll
+							smaliArea.setLoaded();
+						} else {
+							int caret = smaliArea.getCaretPosition();
+							int line = 0;
+							int lineOffset = 0;
+							try {
+								line = smaliArea.getLineOfOffset(caret);
+								lineOffset = caret - smaliArea.getLineStartOffset(line);
+							} catch (Exception ignored) {
+							}
+							JViewport vp = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, smaliArea);
+							Point vpPos = vp != null ? vp.getViewPosition() : null;
+
+							smaliArea.setText(newCode);
+							smaliArea.setLoaded();
+
+							final int fLine = line;
+							final int fOffset = lineOffset;
+							SwingUtilities.invokeLater(() -> {
+								try {
+									int totalLines = smaliArea.getLineCount();
+									int targetLine = Math.min(Math.max(0, fLine), totalLines - 1);
+									int lineStart = smaliArea.getLineStartOffset(targetLine);
+									int lineEnd = smaliArea.getLineEndOffset(targetLine);
+									int targetPos = Math.min(lineStart + fOffset, lineEnd);
+									smaliArea.setCaretPosition(targetPos);
+								} catch (Exception ignored) {
+								}
+								if (vp != null && vpPos != null) {
+									vp.setViewPosition(vpPos);
+								}
+							});
+						}
 					} else {
+						int bcCaret = smaliArea.getCaretPosition();
+						JViewport bcVp = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, smaliArea);
+						Point bcVpPos = bcVp != null ? bcVp.getViewPosition() : null;
 						smaliArea.refresh();
+						SwingUtilities.invokeLater(() -> {
+							try {
+								if (bcCaret < smaliArea.getDocument().getLength()) {
+									smaliArea.setCaretPosition(bcCaret);
+								}
+								if (bcVp != null && bcVpPos != null) {
+									bcVp.setViewPosition(bcVpPos);
+								}
+							} catch (Exception ignored) {
+							}
+						});
 					}
 				}
 			}

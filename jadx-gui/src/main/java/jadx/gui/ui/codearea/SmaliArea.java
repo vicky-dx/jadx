@@ -2,6 +2,7 @@ package jadx.gui.ui.codearea;
 
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.Point;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -16,7 +17,9 @@ import javax.swing.Icon;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
+import javax.swing.JViewport;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.EditorKit;
 import javax.swing.text.JTextComponent;
@@ -252,6 +255,10 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				}
 			}
 
+			int savedCaret = getCaretPosition();
+			JViewport viewport = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, this);
+			Point savedViewPos = viewport != null ? viewport.getViewPosition() : null;
+
 			if (contentPanel instanceof ClassCodeContentPanel) {
 				ClassCodeContentPanel cPanel = (ClassCodeContentPanel) contentPanel;
 				cPanel.updateSmaliAreas(smaliCode);
@@ -261,10 +268,25 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			String msg = commitMsg != null ? commitMsg : "Modified " + classFullName;
 			PatchHistoryManager.getInstance().recordEdit(classFullName, smaliCode, msg);
 
-			JOptionPane.showMessageDialog(contentPanel.getMainWindow(),
-					"✓ Smali applied & Java code updated successfully!\n(Generated DEX: " + dexBytes.length + " bytes)",
-					"Apply Smali Success",
-					JOptionPane.INFORMATION_MESSAGE);
+			SwingUtilities.invokeLater(() -> {
+				try {
+					if (savedCaret <= getDocument().getLength()) {
+						setCaretPosition(savedCaret);
+					}
+				} catch (Exception ignored) {
+				}
+				if (viewport != null && savedViewPos != null) {
+					viewport.setViewPosition(savedViewPos);
+				}
+				requestFocusInWindow();
+			});
+
+			if (commitMsg != null) {
+				UiUtils.showToast(contentPanel.getMainWindow(), "✓ " + commitMsg + " successfully!");
+			} else {
+				UiUtils.showToast(contentPanel.getMainWindow(),
+						"✓ Smali applied & Java updated (" + dexBytes.length + " bytes)");
+			}
 			return true;
 		} catch (Exception e) {
 			LOG.error("Failed to assemble smali for class {}", getJClass().getFullName(), e);

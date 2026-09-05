@@ -170,6 +170,7 @@ public final class CodeArea extends AbstractCodeArea implements CodeAreaSyncerAb
 	public void refresh() {
 		cachedCodeInfo = null;
 		setText(getCodeInfo().getCodeStr());
+		setLoaded();
 	}
 
 	@Override
