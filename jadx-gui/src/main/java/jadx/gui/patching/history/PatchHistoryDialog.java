@@ -59,7 +59,8 @@ public class PatchHistoryDialog extends CommonDialog {
 			}
 		};
 
-		for (PatchCommit commit : history) {
+		for (int i = 0; i < history.size(); i++) {
+			PatchCommit commit = history.get(i);
 			String type = "Edit";
 			if (commit.isBaseline()) {
 				type = "Original Baseline";
@@ -67,6 +68,9 @@ public class PatchHistoryDialog extends CommonDialog {
 				type = "Deploy Milestone";
 			} else if (commit.isReloadSnapshot()) {
 				type = "Reload Snapshot";
+			}
+			if (i == 0) {
+				type += " (Current Active)";
 			}
 			tableModel.addRow(new Object[]{
 					commit.getShortHash(),
@@ -82,6 +86,14 @@ public class PatchHistoryDialog extends CommonDialog {
 		if (table.getRowCount() > 0) {
 			table.setRowSelectionInterval(0, 0);
 		}
+		table.addMouseListener(new java.awt.event.MouseAdapter() {
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e) {
+				if (e.getClickCount() == 2) {
+					showDiff();
+				}
+			}
+		});
 
 		JScrollPane scrollPane = new JScrollPane(table);
 		scrollPane.setPreferredSize(new Dimension(650, 240));
@@ -91,15 +103,19 @@ public class PatchHistoryDialog extends CommonDialog {
 		JPanel btnPanel = new JPanel();
 		btnPanel.setLayout(new BoxLayout(btnPanel, BoxLayout.LINE_AXIS));
 
-		JButton diffBtn = new JButton("🔍 View Diff");
+		JButton diffBtn = new JButton("🔍 View Changes in Checkpoint");
+		JButton diffCurrentBtn = new JButton("🔍 Compare vs Current");
 		JButton rollbackBtn = new JButton("⏪ Rollback to Selected");
 		JButton closeBtn = new JButton("Close");
 
 		diffBtn.addActionListener(e -> showDiff());
+		diffCurrentBtn.addActionListener(e -> showDiffWithCurrent());
 		rollbackBtn.addActionListener(e -> rollbackSelected());
 		closeBtn.addActionListener(e -> dispose());
 
 		btnPanel.add(diffBtn);
+		btnPanel.add(Box.createRigidArea(new Dimension(6, 0)));
+		btnPanel.add(diffCurrentBtn);
 		btnPanel.add(Box.createRigidArea(new Dimension(8, 0)));
 		btnPanel.add(rollbackBtn);
 		btnPanel.add(Box.createHorizontalGlue());
@@ -109,7 +125,7 @@ public class PatchHistoryDialog extends CommonDialog {
 
 		getContentPane().add(mainPanel);
 		pack();
-		setSize(720, 400);
+		setSize(800, 420);
 		setLocationRelativeTo(mainWindow);
 	}
 
@@ -120,20 +136,80 @@ public class PatchHistoryDialog extends CommonDialog {
 			return;
 		}
 		PatchCommit selected = history.get(row);
-		String historicalSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, selected.getFullHash());
-		if (historicalSmali == null) {
+		String selectedSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, selected.getFullHash());
+		if (selectedSmali == null) {
+			JOptionPane.showMessageDialog(this, "Could not load smali for selected checkpoint.", "Error", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		String leftCode;
+		String leftTitle;
+		String rightCode;
+		String rightTitle;
+		String dialogTitle;
+
+		if (row < history.size() - 1) {
+			// Compare against previous checkpoint to show what this checkpoint changed
+			PatchCommit parent = history.get(row + 1);
+			String parentSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, parent.getFullHash());
+			if (parentSmali != null) {
+				leftCode = parentSmali;
+				leftTitle = "Before: " + parent.getShortHash() + " (" + parent.getFormattedTime() + ")";
+				rightCode = selectedSmali;
+				rightTitle = "After: " + selected.getShortHash() + " (" + selected.getFormattedTime() + ")";
+				dialogTitle = "Diff: Changes in Checkpoint " + selected.getShortHash() + " (vs " + parent.getShortHash() + ")";
+			} else {
+				leftCode = selectedSmali;
+				leftTitle = "Checkpoint: " + selected.getShortHash() + " (" + selected.getFormattedTime() + ")";
+				rightCode = currentSmali;
+				rightTitle = "Current Active Version";
+				dialogTitle = "Diff: " + selected.getShortHash() + " vs Current";
+			}
+		} else {
+			// Baseline has no parent, compare against Current Active
+			leftCode = selectedSmali;
+			leftTitle = "Original Baseline: " + selected.getShortHash() + " (" + selected.getFormattedTime() + ")";
+			rightCode = currentSmali;
+			rightTitle = "Current Active Version";
+			dialogTitle = "Diff: Original Baseline vs Current Active";
+		}
+
+		PatchDiffDialog diffDialog = new PatchDiffDialog(
+				mainWindow, classType,
+				dialogTitle,
+				leftCode, leftTitle,
+				rightCode, rightTitle,
+				() -> {
+					if (onApplyCode != null) {
+						onApplyCode.accept(selectedSmali);
+					}
+					dispose();
+				}
+		);
+		diffDialog.setVisible(true);
+	}
+
+	private void showDiffWithCurrent() {
+		int row = table.getSelectedRow();
+		if (row < 0 || row >= history.size()) {
+			JOptionPane.showMessageDialog(this, "Please select a checkpoint from the list.", "History", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		PatchCommit selected = history.get(row);
+		String selectedSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, selected.getFullHash());
+		if (selectedSmali == null) {
 			JOptionPane.showMessageDialog(this, "Could not load smali for selected checkpoint.", "Error", JOptionPane.ERROR_MESSAGE);
 			return;
 		}
 
 		PatchDiffDialog diffDialog = new PatchDiffDialog(
 				mainWindow, classType,
-				"Diff: " + selected.getShortHash() + " vs Current",
-				historicalSmali, "Checkpoint: " + selected.getShortHash() + " (" + selected.getFormattedTime() + ")",
+				"Diff: Checkpoint " + selected.getShortHash() + " vs Current Active",
+				selectedSmali, "Checkpoint: " + selected.getShortHash() + " (" + selected.getFormattedTime() + ")",
 				currentSmali, "Current Active Version",
 				() -> {
 					if (onApplyCode != null) {
-						onApplyCode.accept(historicalSmali);
+						onApplyCode.accept(selectedSmali);
 					}
 					dispose();
 				}
