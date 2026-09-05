@@ -648,6 +648,7 @@ public class MainWindow extends JFrame {
 		initTree();
 		updateLiveReload(project.isEnableLiveReload());
 		BreakpointManager.init(project.getFilePaths().get(0).toAbsolutePath().getParent());
+		jadx.gui.patching.history.PatchProjectSync.onProjectLoaded(this, project);
 		List<EditorViewState> openTabs = project.getOpenTabs(this);
 		backgroundExecutor.startLoading(
 				() -> preLoadOpenTabs(openTabs),

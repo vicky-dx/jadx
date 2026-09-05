@@ -329,6 +329,7 @@ public class JadxProject {
 			} catch (Exception e) {
 				throw new RuntimeException("Error saving project", e);
 			}
+			jadx.gui.patching.history.PatchProjectSync.onProjectSave(this, savePath);
 		}
 	}
 

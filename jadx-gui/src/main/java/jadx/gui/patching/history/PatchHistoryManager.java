@@ -67,14 +67,29 @@ public class PatchHistoryManager {
 		return workingDir;
 	}
 
+	private boolean isTempRepo = false;
+
+	public synchronized boolean isPersistent() {
+		return isInitialized() && !isTempRepo;
+	}
+
 	public synchronized boolean init(Path baseDir) {
 		try {
 			close();
 			if (baseDir == null) {
 				workingDir = Files.createTempDirectory("jadx-patch-history-");
 				workingDir.toFile().deleteOnExit();
+				isTempRepo = true;
 			} else {
-				workingDir = baseDir.resolve(".jadx-patch-history");
+				// If baseDir already ends with .history or is the target history directory, use directly,
+				// otherwise use baseDir.resolve(".jadx-patch-history")
+				if (baseDir.getFileName().toString().endsWith(".history")
+						|| baseDir.getFileName().toString().equals(".jadx-patch-history")) {
+					workingDir = baseDir;
+				} else {
+					workingDir = baseDir.resolve(".jadx-patch-history");
+				}
+				isTempRepo = false;
 			}
 			Files.createDirectories(workingDir);
 			File gitDir = workingDir.resolve(".git").toFile();
@@ -86,11 +101,52 @@ public class PatchHistoryManager {
 			repo = git.getRepository();
 			initialized = true;
 			baselineRecorded.clear();
-			LOG.info("Initialized Git patch history at: {}", workingDir);
+			LOG.info("Initialized Git patch history at: {} (persistent={})", workingDir, !isTempRepo);
 			return true;
 		} catch (Exception e) {
 			LOG.error("Failed to initialize Git patch history", e);
 			initialized = false;
+			return false;
+		}
+	}
+
+	/**
+	 * Migrates the current Git patch history repository to a new target directory.
+	 * Used when saving a project so that the history is stored beside the project file.
+	 */
+	public synchronized boolean migrateTo(Path targetHistoryDir) {
+		if (!isInitialized()) {
+			return init(targetHistoryDir);
+		}
+		if (workingDir != null && workingDir.toAbsolutePath().equals(targetHistoryDir.toAbsolutePath())) {
+			isTempRepo = false;
+			return true;
+		}
+		Path oldWorkingDir = workingDir;
+		try {
+			close();
+			Files.createDirectories(targetHistoryDir);
+			copyDirectoryRecursively(oldWorkingDir, targetHistoryDir);
+			workingDir = targetHistoryDir;
+			isTempRepo = false;
+			git = Git.open(workingDir.toFile());
+			repo = git.getRepository();
+			initialized = true;
+			LOG.info("Successfully migrated patch history repository from {} to {}", oldWorkingDir, targetHistoryDir);
+			return true;
+		} catch (Exception e) {
+			LOG.error("Failed to migrate patch history from {} to {}", oldWorkingDir, targetHistoryDir, e);
+			// Try to recover by reopening original workingDir
+			try {
+				if (oldWorkingDir != null && Files.exists(oldWorkingDir)) {
+					git = Git.open(oldWorkingDir.toFile());
+					repo = git.getRepository();
+					workingDir = oldWorkingDir;
+					initialized = true;
+				}
+			} catch (Exception recEx) {
+				LOG.error("Failed to recover old history repo", recEx);
+			}
 			return false;
 		}
 	}
@@ -159,6 +215,22 @@ public class PatchHistoryManager {
 			LOG.error("Failed to record baseline for {}", classType, e);
 			return false;
 		}
+	}
+
+	public synchronized boolean hasEditsBeyondBaseline(String classType) {
+		if (!isInitialized() || classType == null) {
+			return false;
+		}
+		List<PatchCommit> history = getClassHistory(classType);
+		if (history.isEmpty()) {
+			return false;
+		}
+		String baseline = getBaselineSmali(classType);
+		String latest = getSmaliAtCommit(classType, history.get(0).getFullHash());
+		if (baseline == null || latest == null) {
+			return false;
+		}
+		return !baseline.equals(latest);
 	}
 
 	public synchronized PatchCommit recordEdit(String classType, String smaliCode, String commitMsg) {
@@ -537,6 +609,57 @@ public class PatchHistoryManager {
 		}
 		String normalized = content != null ? content.replace("\r\n", "\n").replace('\r', '\n') : "";
 		Files.write(target, normalized.getBytes(StandardCharsets.UTF_8));
+	}
+
+	/**
+	 * Returns a map of (relPath -> latestSmaliContent) for all smali files tracked in HEAD.
+	 */
+	public synchronized Map<String, String> getAllTrackedSmaliFiles() {
+		if (!isInitialized()) {
+			return Collections.emptyMap();
+		}
+		Map<String, String> result = new HashMap<>();
+		try {
+			ObjectId head = repo.resolve(Constants.HEAD);
+			if (head == null) {
+				return Collections.emptyMap();
+			}
+			try (RevWalk walk = new RevWalk(repo)) {
+				RevCommit commit = walk.parseCommit(head);
+				RevTree tree = commit.getTree();
+				try (TreeWalk treeWalk = new TreeWalk(repo)) {
+					treeWalk.addTree(tree);
+					treeWalk.setRecursive(true);
+					while (treeWalk.next()) {
+						String pathString = treeWalk.getPathString();
+						if (pathString.endsWith(".smali")) {
+							ObjectId blobId = treeWalk.getObjectId(0);
+							ObjectLoader loader = repo.open(blobId);
+							String content = new String(loader.getBytes(), StandardCharsets.UTF_8);
+							result.put(pathString, content.replace("\r\n", "\n").replace('\r', '\n'));
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			LOG.error("Failed to retrieve tracked smali files", e);
+		}
+		return result;
+	}
+
+	private void copyDirectoryRecursively(Path source, Path target) throws IOException {
+		if (Files.isDirectory(source)) {
+			if (!Files.exists(target)) {
+				Files.createDirectories(target);
+			}
+			try (java.util.stream.Stream<Path> stream = Files.list(source)) {
+				for (Path child : (Iterable<Path>) stream::iterator) {
+					copyDirectoryRecursively(child, target.resolve(child.getFileName()));
+				}
+			}
+		} else {
+			Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		}
 	}
 
 	private void deleteRecursively(File file) {

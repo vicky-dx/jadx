@@ -187,4 +187,57 @@ class PatchHistoryManagerTest {
 
 		assertThat(totalSize).isLessThan(100_000L); // under 100 KB!
 	}
+
+	@Test
+	void testRepositoryMigrationToPersistentProjectDir() throws Exception {
+		// Initialize with null to simulate regular unsaved temporary session
+		historyManager.init(null);
+
+		Path targetProjectHistoryDir = Files.createTempDirectory("jadx-persisted-project.jadx.history");
+		try {
+			String classType = "Lcom/example/PersistedClass;";
+			historyManager.recordBaseline(classType, "baseline_content");
+			historyManager.recordEdit(classType, "edit_v1_content", "First modification");
+
+			assertThat(historyManager.isPersistent()).isFalse();
+
+			// Migrate to project directory
+			boolean migrated = historyManager.migrateTo(targetProjectHistoryDir);
+			assertThat(migrated).isTrue();
+			assertThat(historyManager.isPersistent()).isTrue();
+			assertThat(historyManager.getWorkingDir().toAbsolutePath())
+					.isEqualTo(targetProjectHistoryDir.toAbsolutePath());
+
+			// Verify history and content are preserved after migration
+			List<PatchCommit> history = historyManager.getClassHistory(classType);
+			assertThat(history).hasSize(2);
+			assertThat(historyManager.getHistoricalSmali(classType, 0)).isEqualTo("edit_v1_content");
+			assertThat(historyManager.hasEditsBeyondBaseline(classType)).isTrue();
+
+			// Add another edit in persistent location
+			historyManager.recordEdit(classType, "edit_v2_content", "Second modification");
+			assertThat(historyManager.getClassHistory(classType)).hasSize(3);
+			assertThat(historyManager.getHistoricalSmali(classType, 0)).isEqualTo("edit_v2_content");
+		} finally {
+			// cleanup target dir
+			if (Files.exists(targetProjectHistoryDir)) {
+				for (Path p : (Iterable<Path>) Files.walk(targetProjectHistoryDir).sorted((a, b) -> b.compareTo(a))::iterator) {
+					try {
+						Files.deleteIfExists(p);
+					} catch (Exception ignored) {
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	void testPathToClassTypeMapping() {
+		assertThat(PatchProjectSync.pathToClassType("classes/com/example/MainActivity.smali"))
+				.isEqualTo("Lcom/example/MainActivity;");
+		assertThat(PatchProjectSync.pathToClassType("classes/org/jadx/ui/App.smali"))
+				.isEqualTo("Lorg/jadx/ui/App;");
+		assertThat(PatchProjectSync.pathToClassType("classes/Main.smali"))
+				.isEqualTo("LMain;");
+	}
 }
