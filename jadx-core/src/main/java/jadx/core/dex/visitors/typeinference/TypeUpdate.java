@@ -204,6 +204,9 @@ public final class TypeUpdate {
 		if (candidateType == null) {
 			throw new JadxRuntimeException("Null type update for arg: " + arg);
 		}
+		if (arg == null) {
+			return REJECT;
+		}
 		if (updateInfo.isProcessed(arg)) {
 			return CHANGED;
 		}
@@ -447,7 +450,10 @@ public final class TypeUpdate {
 	}
 
 	private TypeUpdateResult sameFirstArgListener(TypeUpdateInfo updateInfo, InsnNode insn, InsnArg arg, ArgType candidateType) {
-		InsnArg changeArg = isAssign(insn, arg) ? insn.getArg(0) : insn.getResult();
+		InsnArg changeArg = isAssign(insn, arg) ? (insn.getArgsCount() > 0 ? insn.getArg(0) : null) : insn.getResult();
+		if (changeArg == null) {
+			return REJECT;
+		}
 		if (updateInfo.hasUpdateWithType(changeArg, candidateType)) {
 			return CHANGED;
 		}
@@ -459,7 +465,10 @@ public final class TypeUpdate {
 			return CHANGED;
 		}
 		boolean assignChanged = isAssign(insn, arg);
-		InsnArg changeArg = assignChanged ? insn.getArg(0) : insn.getResult();
+		InsnArg changeArg = assignChanged ? (insn.getArgsCount() > 0 ? insn.getArg(0) : null) : insn.getResult();
+		if (changeArg == null) {
+			return REJECT;
+		}
 
 		// allow result to be wider
 		TypeCompareEnum cmp = comparator.compareTypes(candidateType, changeArg.getType());
@@ -485,7 +494,11 @@ public final class TypeUpdate {
 	 */
 	private TypeUpdateResult allSameListener(TypeUpdateInfo updateInfo, InsnNode insn, InsnArg arg, ArgType candidateType) {
 		if (!isAssign(insn, arg)) {
-			return queueTypeUpdate(updateInfo, insn.getResult(), candidateType, null);
+			RegisterArg resultArg = insn.getResult();
+			if (resultArg == null) {
+				return SAME;
+			}
+			return queueTypeUpdate(updateInfo, resultArg, candidateType, null);
 		}
 		// update args with same type
 		var updateCallback = new ArgsListUpdateCallback<>(this, updateInfo, insn.getArgList(), candidateType, false);

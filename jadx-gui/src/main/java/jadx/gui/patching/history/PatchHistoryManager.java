@@ -424,10 +424,14 @@ public class PatchHistoryManager {
 			LOG.error("Failed to build modified classes overview", e);
 		}
 
-		// Filter out classes that were only viewed/baselined without any actual user edits
+		// Filter out classes that were only viewed/baselined without any actual user edits, or ghost in-memory registrations
 		result.entrySet().removeIf(entry -> {
 			ModifiedClassSummary summary = entry.getValue();
 			if (summary.isInMemoryModified()) {
+				// Gate 2: If a class has 0 checkpoints and no history beyond baseline, it's an untouched inlined ghost
+				if (summary.getCheckpointCount() == 0 && !hasEditsBeyondBaseline(summary.getClassType())) {
+					return true;
+				}
 				return false; // keep active in-memory modified classes
 			}
 			return summary.getCheckpointCount() <= 1;

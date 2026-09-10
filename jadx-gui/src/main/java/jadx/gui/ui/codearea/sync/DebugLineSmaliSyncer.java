@@ -102,11 +102,16 @@ public class DebugLineSmaliSyncer implements IToJavaSyncStrategy {
 					}
 
 					if (targetJavaLine == -1) {
-						targetJavaLine = javaMth.startLine - 1; // 0-indexed
+						Integer smartJavaLine = findSmartJavaLineInMethod(to, lineIndex, fromLines, smaliMthStartLine, javaMth);
+						if (smartJavaLine != null) {
+							targetJavaLine = smartJavaLine;
+						} else {
+							targetJavaLine = javaMth.startLine - 1; // 0-indexed fallback
+						}
 					}
 
 					CodeSyncHighlighter.defaultHighlighter().highlightAndScrollToLine(to, targetJavaLine);
-					LOG.info("{} - successful sync of smali to code", LOG.getName());
+					LOG.debug("{} - successful sync of smali to code (target line: {})", LOG.getName(), targetJavaLine + 1);
 					return true;
 				}
 			}
@@ -315,5 +320,101 @@ public class DebugLineSmaliSyncer implements IToJavaSyncStrategy {
 		public String toString() {
 			return String.format("Anchor %s, %d, %d", type.name(), smaliLineNumber, codeMappedLineNumber);
 		}
+	}
+
+	private static @Nullable Integer findSmartJavaLineInMethod(CodeArea to, int smaliLineIndex,
+			String[] fromLines, int smaliMthStartLine, MethodDecl javaMth) {
+		try {
+			String smaliLine = fromLines[smaliLineIndex].trim();
+			if (smaliLine.isEmpty()) {
+				return null;
+			}
+			LOG.debug("SmartSync [Smali -> Java] Analyzing Smali line {}: '{}'", smaliLineIndex + 1, smaliLine);
+
+			// 1. String Literal Match
+			if (smaliLine.contains("\"")) {
+				String smaliLit = extractSingleStringLiteral(smaliLine);
+				if (smaliLit != null && !smaliLit.isEmpty()) {
+					String unescaped = unescapeString(smaliLit);
+					for (int l = javaMth.startLine; l <= javaMth.endLine; l++) {
+						String javaLine = to.getLineText(l);
+						if (javaLine.contains("\"" + unescaped + "\"") || javaLine.contains(unescaped)) {
+							LOG.debug("SmartSync [Smali -> Java] Matched literal \"{}\" to Java line {}", unescaped, l);
+							return l - 1; // 0-indexed
+						}
+					}
+				}
+			}
+
+			// 2. Method Invocations Match
+			if (smaliLine.contains("->")) {
+				int arrowIdx = smaliLine.indexOf("->");
+				int parenIdx = smaliLine.indexOf('(', arrowIdx);
+				if (arrowIdx != -1 && parenIdx > arrowIdx) {
+					String mthName = smaliLine.substring(arrowIdx + 2, parenIdx).trim();
+					if (!mthName.equals("<init>") && !mthName.equals("<clinit>")) {
+						for (int l = javaMth.startLine; l <= javaMth.endLine; l++) {
+							String javaLine = to.getLineText(l);
+							if (javaLine.contains("." + mthName + "(") || javaLine.contains(mthName + "(")) {
+								LOG.debug("SmartSync [Smali -> Java] Matched method call '{}' to Java line {}", mthName, l);
+								return l - 1; // 0-indexed
+							}
+						}
+					}
+				}
+			}
+
+			// 3. New Instance Match
+			if (smaliLine.startsWith("new-instance")) {
+				int lastSlash = smaliLine.lastIndexOf('/');
+				int semi = smaliLine.indexOf(';', lastSlash);
+				if (lastSlash != -1 && semi > lastSlash) {
+					String simpleCls = smaliLine.substring(lastSlash + 1, semi);
+					int dollar = simpleCls.lastIndexOf('$');
+					if (dollar != -1) {
+						simpleCls = simpleCls.substring(dollar + 1);
+					}
+					for (int l = javaMth.startLine; l <= javaMth.endLine; l++) {
+						String javaLine = to.getLineText(l);
+						if (javaLine.contains("new " + simpleCls)) {
+							LOG.debug("SmartSync [Smali -> Java] Matched new '{}' to Java line {}", simpleCls, l);
+							return l - 1; // 0-indexed
+						}
+					}
+				}
+			}
+
+			// 4. Relative Position Progression (Fallback inside method)
+			int smaliMthEndLine = -1;
+			for (int i = smaliLineIndex; i < fromLines.length; i++) {
+				if (fromLines[i].trim().equals(".end method")) {
+					smaliMthEndLine = i;
+					break;
+				}
+			}
+			if (smaliMthEndLine > smaliMthStartLine) {
+				double progress = (double) (smaliLineIndex - smaliMthStartLine) / (smaliMthEndLine - smaliMthStartLine);
+				int targetJavaLine = javaMth.startLine + (int) Math.round(progress * (javaMth.endLine - javaMth.startLine));
+				targetJavaLine = Math.max(javaMth.startLine, Math.min(targetJavaLine, javaMth.endLine));
+				LOG.debug("SmartSync [Smali -> Java] Relative progress ({:.1f}%) mapped to Java line {}", progress * 100, targetJavaLine);
+				return targetJavaLine - 1; // 0-indexed
+			}
+		} catch (Exception e) {
+			LOG.debug("SmartSync [Smali -> Java] Error during smart matching", e);
+		}
+		return null;
+	}
+
+	private static @Nullable String extractSingleStringLiteral(String line) {
+		int firstQuote = line.indexOf('"');
+		int lastQuote = line.lastIndexOf('"');
+		if (firstQuote != -1 && lastQuote > firstQuote) {
+			return line.substring(firstQuote + 1, lastQuote);
+		}
+		return null;
+	}
+
+	private static String unescapeString(String s) {
+		return s.replace("\\'", "'").replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t");
 	}
 }

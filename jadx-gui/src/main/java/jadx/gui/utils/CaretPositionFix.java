@@ -79,8 +79,13 @@ public class CaretPositionFix {
 			return;
 		}
 		try {
-			int newPos = getNewPos();
-			int newLine = codeArea.getLineOfOffset(newPos);
+			int newLinesCount = codeArea.getLineCount();
+			if (newLinesCount <= 0) {
+				return;
+			}
+			int docLen = codeArea.getDocument().getLength();
+			int newPos = Math.max(0, Math.min(getNewPos(), docLen));
+			int newLine = Math.max(0, Math.min(codeArea.getLineOfOffset(newPos), newLinesCount - 1));
 			Token token = codeArea.getTokenListForLine(newLine);
 			int tokenPos = getOffsetFromTokenInfo(tokenInfo, token);
 			if (tokenPos == -1) {
@@ -95,7 +100,7 @@ public class CaretPositionFix {
 					tokenPos = lineEndOffset;
 				}
 			}
-			codeArea.setCaretPosition(tokenPos);
+			codeArea.setCaretPosition(Math.max(0, Math.min(tokenPos, docLen)));
 			LOG.debug("Restored caret position: {}", tokenPos);
 		} catch (Exception e) {
 			LOG.warn("Failed to restore caret position", e);
@@ -127,6 +132,7 @@ public class CaretPositionFix {
 		}
 		// fallback: assume lines added/removed before caret
 		int newLine = line - (linesCount - newLinesCount);
+		newLine = Math.max(0, Math.min(newLine, Math.max(0, newLinesCount - 1)));
 		return codeArea.getLineStartOffset(newLine);
 	}
 

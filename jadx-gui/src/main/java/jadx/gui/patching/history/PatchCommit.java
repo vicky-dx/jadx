@@ -74,6 +74,14 @@ public class PatchCommit {
 		return (tagName != null && tagName.startsWith("reload-")) || message.contains("[snapshot-before-reload]");
 	}
 
+	public boolean isMilestone() {
+		return isDeployMilestone() || isExportMilestone() || isReloadSnapshot();
+	}
+
+	public boolean isCodeEdit() {
+		return !isBaseline() && !isMilestone();
+	}
+
 	public String getFormattedTime() {
 		try {
 			return DATE_FORMAT.format(Instant.ofEpochMilli(timestamp));

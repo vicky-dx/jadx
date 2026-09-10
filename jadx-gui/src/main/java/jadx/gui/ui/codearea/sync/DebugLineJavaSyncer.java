@@ -4,6 +4,8 @@ import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -21,6 +23,10 @@ import jadx.gui.ui.codearea.SmaliArea;
  */
 public class DebugLineJavaSyncer implements IToSmaliSyncStrategy, IToJavaSyncStrategy {
 	private static final Logger LOG = LoggerFactory.getLogger(DebugLineJavaSyncer.class);
+
+	private static final Pattern STR_LITERAL_PATTERN = Pattern.compile("\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"");
+	private static final Pattern METHOD_CALL_PATTERN = Pattern.compile("(?<!new\\s)\\b([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*\\(");
+	private static final Pattern NEW_INSTANCE_PATTERN = Pattern.compile("new\\s+([A-Za-z0-9_$]+)");
 
 	private final CodeArea from;
 
@@ -87,10 +93,17 @@ public class DebugLineJavaSyncer implements IToSmaliSyncStrategy, IToJavaSyncStr
 								}
 							}
 						}
+						// If .line directive was not found or failed to match, use smart intra-method sync
+						if (targetSmaliLine == smaliMthRange.headerLine) {
+							Integer smartLine = findSmartSmaliLineInMethod(from, lineNum, smaliLines, smaliMthRange, scope);
+							if (smartLine != null) {
+								targetSmaliLine = smartLine;
+							}
+						}
 					}
 
 					CodeSyncHighlighter.defaultHighlighter().highlightAndScrollToLine(to, targetSmaliLine);
-					LOG.info("{} - successful sync of code to smali", LOG.getName());
+					LOG.debug("{} - successful sync of code to smali (target line: {})", LOG.getName(), targetSmaliLine + 1);
 					return true;
 				}
 			}
@@ -296,6 +309,132 @@ public class DebugLineJavaSyncer implements IToSmaliSyncStrategy, IToJavaSyncStr
 			--cur;
 		}
 		return sourceLine;
+	}
+
+	private static @Nullable Integer findSmartSmaliLineInMethod(CodeArea from, int javaLineNum,
+			String[] smaliLines, SmaliMethodRange smaliMthRange, MethodScope scope) {
+		try {
+			String javaLine = from.getLineText(javaLineNum).trim();
+			if (javaLine.isEmpty()) {
+				return null;
+			}
+			LOG.debug("SmartSync [Java -> Smali] Analyzing Java line {}: '{}'", javaLineNum, javaLine);
+
+			// 1. String Literals Match
+			List<String> literals = extractStringLiterals(javaLine);
+			for (String lit : literals) {
+				if (lit.isEmpty()) {
+					continue;
+				}
+				String unescaped = unescapeString(lit);
+				for (int i = smaliMthRange.headerLine; i <= smaliMthRange.endLine; i++) {
+					String smaliTrimmed = smaliLines[i].trim();
+					if (smaliTrimmed.startsWith("const-string")) {
+						String smaliLit = extractSingleStringLiteral(smaliTrimmed);
+						if (smaliLit != null && unescapeString(smaliLit).equals(unescaped)) {
+							LOG.debug("SmartSync [Java -> Smali] Matched string literal \"{}\" to Smali line {}", unescaped, i + 1);
+							return i;
+						}
+					}
+				}
+			}
+
+			// 2. Method Invocations Match
+			List<String> methodCalls = extractMethodCalls(javaLine);
+			for (String mthCall : methodCalls) {
+				String targetCall = "->" + mthCall + "(";
+				for (int i = smaliMthRange.headerLine; i <= smaliMthRange.endLine; i++) {
+					if (smaliLines[i].contains(targetCall)) {
+						LOG.debug("SmartSync [Java -> Smali] Matched method call '{}' to Smali line {}", mthCall, i + 1);
+						return i;
+					}
+				}
+			}
+
+			// 3. New Instance / Class Match
+			Matcher newMatcher = NEW_INSTANCE_PATTERN.matcher(javaLine);
+			if (newMatcher.find()) {
+				String clsSimpleName = newMatcher.group(1);
+				for (int i = smaliMthRange.headerLine; i <= smaliMthRange.endLine; i++) {
+					String smaliTrimmed = smaliLines[i].trim();
+					if (smaliTrimmed.startsWith("new-instance") && smaliTrimmed.contains("/" + clsSimpleName + ";")) {
+						LOG.debug("SmartSync [Java -> Smali] Matched new-instance '{}' to Smali line {}", clsSimpleName, i + 1);
+						return i;
+					}
+				}
+			}
+
+			// 4. Relative Position Progression (Fallback inside method)
+			double progress = (double) (javaLineNum - scope.startLine) / Math.max(1, scope.endLine - scope.startLine);
+			List<Integer> instructionLines = new ArrayList<>();
+			for (int i = smaliMthRange.headerLine + 1; i <= smaliMthRange.endLine; i++) {
+				String trimmed = smaliLines[i].trim();
+				if (!trimmed.isEmpty() && !trimmed.startsWith(".") && !trimmed.startsWith("#") && !trimmed.startsWith(":")) {
+					instructionLines.add(i);
+				}
+			}
+			if (!instructionLines.isEmpty()) {
+				int idx = (int) Math.round(progress * (instructionLines.size() - 1));
+				idx = Math.max(0, Math.min(idx, instructionLines.size() - 1));
+				int chosenLine = instructionLines.get(idx);
+				LOG.debug("SmartSync [Java -> Smali] Relative progress ({:.1f}%) mapped to Smali line {}", progress * 100, chosenLine + 1);
+				return chosenLine;
+			}
+		} catch (Exception e) {
+			LOG.debug("SmartSync [Java -> Smali] Error during smart matching", e);
+		}
+		return null;
+	}
+
+	private static List<String> extractStringLiterals(String line) {
+		List<String> list = new ArrayList<>();
+		Matcher m = STR_LITERAL_PATTERN.matcher(line);
+		while (m.find()) {
+			list.add(m.group(1));
+		}
+		return list;
+	}
+
+	private static @Nullable String extractSingleStringLiteral(String line) {
+		int firstQuote = line.indexOf('"');
+		int lastQuote = line.lastIndexOf('"');
+		if (firstQuote != -1 && lastQuote > firstQuote) {
+			return line.substring(firstQuote + 1, lastQuote);
+		}
+		return null;
+	}
+
+	private static String unescapeString(String s) {
+		return s.replace("\\'", "'").replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t");
+	}
+
+	private static List<String> extractMethodCalls(String line) {
+		List<String> list = new ArrayList<>();
+		Matcher m = METHOD_CALL_PATTERN.matcher(line);
+		while (m.find()) {
+			String name = m.group(1);
+			if (!isControlFlowKeyword(name)) {
+				list.add(name);
+			}
+		}
+		return list;
+	}
+
+	private static boolean isControlFlowKeyword(String word) {
+		switch (word) {
+			case "if":
+			case "while":
+			case "for":
+			case "switch":
+			case "catch":
+			case "synchronized":
+			case "return":
+			case "super":
+			case "this":
+				return true;
+			default:
+				return false;
+		}
 	}
 }
 

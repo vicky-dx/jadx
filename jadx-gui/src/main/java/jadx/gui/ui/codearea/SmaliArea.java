@@ -55,6 +55,9 @@ import jadx.gui.patching.history.PatchCommit;
 import jadx.gui.patching.history.PatchDiffDialog;
 import jadx.gui.patching.history.PatchHistoryDialog;
 import jadx.gui.patching.history.PatchHistoryManager;
+import jadx.gui.patching.history.SmaliHunk;
+import jadx.gui.patching.history.SmaliMethodChange;
+import jadx.gui.patching.history.SmaliMethodDiffParser;
 import jadx.gui.treemodel.JClass;
 import jadx.gui.treemodel.JNode;
 import jadx.gui.treemodel.TextNode;
@@ -97,6 +100,16 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				}
 			});
 
+			KeyStroke checkpointKey = KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton() | KeyEvent.SHIFT_DOWN_MASK);
+			UiUtils.addKeyBinding(this, checkpointKey, "SaveCheckpointAction", new AbstractAction() {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					saveCheckpoint();
+				}
+			});
+
 			KeyStroke rollbackKey = KeyStroke.getKeyStroke(KeyEvent.VK_Z, UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK);
 			UiUtils.addKeyBinding(this, rollbackKey, "RollbackSmaliAction", new AbstractAction() {
 				private static final long serialVersionUID = 1L;
@@ -115,33 +128,38 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 	protected JPopupMenu createPopupMenu() {
 		JPopupMenu popup = super.createPopupMenu();
 		if (!isShowingDalvikBytecode()) {
-			JMenuItem applyItem = new JMenuItem("Apply Smali Changes");
+			JMenuItem applyItem = new JMenuItem("Apply Smali Changes (Working Tree)");
 			applyItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton()));
 			applyItem.addActionListener(e -> applySmali());
 			popup.add(applyItem, 0);
 
+			JMenuItem checkpointItem = new JMenuItem("💾 Save Checkpoint...");
+			checkpointItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, UiUtils.ctrlButton() | KeyEvent.SHIFT_DOWN_MASK));
+			checkpointItem.addActionListener(e -> saveCheckpoint());
+			popup.add(checkpointItem, 1);
+
 			JMenuItem rollbackItem = new JMenuItem("⏪ Rollback to Previous Edit");
 			rollbackItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK));
 			rollbackItem.addActionListener(e -> rollbackPreviousEdit());
-			popup.add(rollbackItem, 1);
+			popup.add(rollbackItem, 2);
 
 			JMenuItem diffPrevItem = new JMenuItem("🔍 Compare with Previous Edit");
 			diffPrevItem.addActionListener(e -> showDiffWithPrevious());
-			popup.add(diffPrevItem, 2);
+			popup.add(diffPrevItem, 3);
 
 			JMenuItem diffOrigItem = new JMenuItem("🔍 Compare with Original APK");
 			diffOrigItem.addActionListener(e -> showDiffWithOriginal());
-			popup.add(diffOrigItem, 3);
+			popup.add(diffOrigItem, 4);
 
 			JMenuItem revertItem = new JMenuItem("🔄 Revert to Original APK State");
 			revertItem.addActionListener(e -> revertToBaseline());
-			popup.add(revertItem, 4);
+			popup.add(revertItem, 5);
 
 			JMenuItem historyItem = new JMenuItem("📜 Patch Timeline & History...");
 			historyItem.addActionListener(e -> showPatchHistory());
-			popup.add(historyItem, 5);
+			popup.add(historyItem, 6);
 
-			popup.add(new JPopupMenu.Separator(), 6);
+			popup.add(new JPopupMenu.Separator(), 7);
 		}
 		return popup;
 	}
@@ -191,10 +209,35 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			JOptionPane.showMessageDialog(this, "Dalvik bytecode view is read-only.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
 			return false;
 		}
-		return applySmaliCode(getText(), null);
+		return applySmaliWorkingTree(getText());
+	}
+
+	public boolean saveCheckpoint() {
+		if (isShowingDalvikBytecode()) {
+			JOptionPane.showMessageDialog(this, "Dalvik bytecode view is read-only.", "Save Checkpoint", JOptionPane.WARNING_MESSAGE);
+			return false;
+		}
+		String classFullName = getJClass().getFullName();
+		String msg = JOptionPane.showInputDialog(this, "Enter Checkpoint Description (optional):", "Save Checkpoint — " + classFullName, JOptionPane.PLAIN_MESSAGE);
+		if (msg == null) {
+			return false;
+		}
+		msg = msg.trim();
+		if (msg.isEmpty()) {
+			msg = "Checkpoint: " + classFullName;
+		}
+		return applySmaliCode(getText(), msg);
+	}
+
+	public boolean applySmaliWorkingTree(String smaliCode) {
+		return applySmaliInternal(smaliCode, null, false);
 	}
 
 	public boolean applySmaliCode(String smaliCode, @org.jetbrains.annotations.Nullable String commitMsg) {
+		return applySmaliInternal(smaliCode, commitMsg, true);
+	}
+
+	public boolean applySmaliInternal(String smaliCode, @org.jetbrains.annotations.Nullable String commitMsg, boolean recordGitCommit) {
 		if (smaliCode == null || smaliCode.trim().isEmpty()) {
 			JOptionPane.showMessageDialog(this, "Smali code is empty.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
 			return false;
@@ -238,8 +281,10 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					LOG.debug("Could not record initial baseline for {}", classFullName, e);
 				}
 			}
-			// Now works correctly: both sides are LF-normalized
 			boolean isBaseline = baselineCode != null && baselineCode.equals(smaliCode);
+
+			// Map class chunks from smaliCode for auxiliary/inlined class verification
+			Map<String, String> smaliClassChunks = extractClassChunks(smaliCode);
 
 			codeLoader.visitClasses(newClsData -> {
 				String rawType = newClsData.getType();
@@ -251,11 +296,38 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					}
 					clsNode.updateClassData(newClsData);
 					clsNode.setInputFileName(origDex);
-					if (isBaseline) {
+
+					String cleanType = ArgType.object(rawType).getObject();
+					boolean isTargetOrInner = cleanType.equals(classFullName)
+							|| cleanType.startsWith(classFullName + "$");
+
+					boolean classModified = false;
+					if (isTargetOrInner) {
+						classModified = !isBaseline;
+					} else {
+						// Auxiliary/inlined class (e.g. c1.f): only register if its chunk actually differs from baseline
+						String chunk = smaliClassChunks.get(rawType);
+						if (chunk != null) {
+							String origSmali = PatchHistoryManager.getInstance().getBaselineSmali(cleanType);
+							if (origSmali == null) {
+								try {
+									origSmali = clsNode.getDisassembledCode();
+								} catch (Exception ignored) {
+								}
+							}
+							if (origSmali != null) {
+								String normOrig = origSmali.replace("\r\n", "\n").replace('\r', '\n').trim();
+								classModified = !normOrig.equals(chunk);
+							}
+						}
+					}
+
+					if (!classModified) {
 						ModifiedDexManager.getInstance().unregisterModifiedClass(rawType);
 					} else {
 						ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
 					}
+
 					ClassNode topParent = clsNode.getTopParentClass();
 					if (!reloadedTopClasses.contains(topParent)) {
 						reloadedTopClasses.add(topParent);
@@ -280,10 +352,10 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 				cPanel.refreshJavaViews();
 			}
 
-			String msg = commitMsg != null ? commitMsg : "Modified " + classFullName;
-			// Bug 1 fix: recordEdit now internally deduplicates — if content is identical
-			// to HEAD it will skip the commit. No need to check here separately.
-			PatchHistoryManager.getInstance().recordEdit(classFullName, smaliCode, msg);
+			if (recordGitCommit) {
+				String msg = commitMsg != null ? commitMsg : "Modified " + classFullName;
+				PatchHistoryManager.getInstance().recordEdit(classFullName, smaliCode, msg);
+			}
 
 			SwingUtilities.invokeLater(() -> {
 				try {
@@ -300,9 +372,12 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 			if (commitMsg != null) {
 				UiUtils.showToast(contentPanel.getMainWindow(), "✓ " + commitMsg + " successfully!");
-			} else {
+			} else if (recordGitCommit) {
 				UiUtils.showToast(contentPanel.getMainWindow(),
 						"✓ Smali applied & Java updated (" + dexBytes.length + " bytes)");
+			} else {
+				UiUtils.showToast(contentPanel.getMainWindow(),
+						"✓ Working Tree updated (" + dexBytes.length + " bytes)");
 			}
 			return true;
 		} catch (Exception e) {
@@ -316,11 +391,49 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 		}
 	}
 
+	private Map<String, String> extractClassChunks(String smaliCode) {
+		Map<String, String> map = new HashMap<>();
+		List<String> blocks = SmaliUtils.splitClasses(smaliCode);
+		for (String block : blocks) {
+			String[] lines = block.split("\n");
+			for (String line : lines) {
+				String trimmed = line.trim();
+				if (trimmed.startsWith(".class ")) {
+					int lastSpace = trimmed.lastIndexOf(' ');
+					if (lastSpace != -1) {
+						String desc = trimmed.substring(lastSpace + 1).trim();
+						if (desc.startsWith("L") && desc.endsWith(";")) {
+							map.put(desc, block.trim());
+						}
+					}
+					break;
+				}
+			}
+		}
+		return map;
+	}
+
+	public boolean revertHunk(SmaliHunk hunk) {
+		SmaliMethodDiffParser.RevertResult result = SmaliMethodDiffParser.applyHunkReversion(getText(), hunk);
+		if (!result.isSuccess()) {
+			String title = result.isAmbiguous() ? "Ambiguous Hunk" : "Revert Conflict";
+			JOptionPane.showMessageDialog(this, result.getErrorMessage(), title, JOptionPane.WARNING_MESSAGE);
+			return false;
+		}
+		return applySmaliWorkingTree(result.getNewSmali());
+	}
+
+	public boolean revertMethod(SmaliMethodChange change) {
+		SmaliMethodDiffParser.RevertResult result = SmaliMethodDiffParser.applyMethodReversion(getText(), change);
+		if (!result.isSuccess()) {
+			JOptionPane.showMessageDialog(this, result.getErrorMessage(), "Revert Conflict", JOptionPane.WARNING_MESSAGE);
+			return false;
+		}
+		return applySmaliWorkingTree(result.getNewSmali());
+	}
+
 	public boolean rollbackPreviousEdit() {
 		String classType = getJClass().getFullName();
-		// Bug 7 fix: don't blindly take index=1; scan history for the first DISTINCT prior state.
-		// With Bug 1 fix, duplicates won't be created anymore, but this protects against any
-		// existing repositories that already have duplicate commits.
 		String currentCode = getText().replace("\r\n", "\n").replace('\r', '\n');
 		String prevCode = PatchHistoryManager.getInstance().getPreviousDistinctSmali(classType, currentCode);
 		if (prevCode == null) {
