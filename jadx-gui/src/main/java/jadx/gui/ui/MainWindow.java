@@ -879,12 +879,18 @@ public class MainWindow extends JFrame {
 	}
 
 	public void openPatchTimeline() {
+		String activeClass = null;
 		ContentPanel selectedContentPanel = tabbedPane.getSelectedContentPanel();
 		if (selectedContentPanel instanceof ClassCodeContentPanel) {
-			((ClassCodeContentPanel) selectedContentPanel).showPatchHistory();
-		} else {
-			UiUtils.showMessageBox(this, "Please open a class in Smali view to inspect its patch history.");
+			ClassCodeContentPanel cPanel = (ClassCodeContentPanel) selectedContentPanel;
+			if (cPanel.getSmaliCodeArea() instanceof jadx.gui.ui.codearea.SmaliArea) {
+				jadx.gui.ui.codearea.SmaliArea sa = (jadx.gui.ui.codearea.SmaliArea) cPanel.getSmaliCodeArea();
+				if (sa.getJClass() != null) {
+					activeClass = sa.getJClass().getFullName();
+				}
+			}
 		}
+		new jadx.gui.patching.history.GlobalPatchHistoryDialog(this, activeClass).setVisible(true);
 	}
 
 	public void initTree() {

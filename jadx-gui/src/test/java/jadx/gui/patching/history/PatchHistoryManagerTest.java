@@ -240,4 +240,42 @@ class PatchHistoryManagerTest {
 		assertThat(PatchProjectSync.pathToClassType("classes/Main.smali"))
 				.isEqualTo("LMain;");
 	}
+
+	@Test
+	void testDefaultPackageUnification() {
+		String smali = ".class public Lzl0;\n.super Ljava/lang/Object;\n";
+		byte[] dex = jadx.plugins.input.smali.SmaliUtils.assemble(smali);
+
+		// Register in-memory modification as Lzl0; in classes2.dex
+		jadx.gui.patching.ModifiedDexManager.getInstance().clear();
+		jadx.gui.patching.ModifiedDexManager.getInstance().registerModifiedClass(
+				"classes2.dex", "Lzl0;", dex);
+
+		// Record git history under alias defpackage.zl0
+		historyManager.recordBaseline("defpackage.zl0", smali);
+		historyManager.recordEdit("defpackage.zl0", smali + "# edit 1\n", "Modified defpackage.zl0");
+
+		// Both "zl0" and "defpackage.zl0" must retrieve the same commit history
+		List<PatchCommit> histByRaw = historyManager.getClassHistory("zl0");
+		List<PatchCommit> histByAlias = historyManager.getClassHistory("defpackage.zl0");
+		assertThat(histByRaw).hasSize(2);
+		assertThat(histByAlias).hasSize(2);
+
+		// Smali content lookup must work with either name
+		String smaliByRaw = historyManager.getHistoricalSmali("zl0", 0);
+		String smaliByAlias = historyManager.getHistoricalSmali("defpackage.zl0", 0);
+		assertThat(smaliByRaw).contains("# edit 1");
+		assertThat(smaliByAlias).isEqualTo(smaliByRaw);
+
+		// getModifiedClassesOverview must merge in-memory (classes2.dex) and git history into ONE single class summary
+		java.util.Map<String, PatchHistoryManager.ModifiedClassSummary> overview = historyManager.getModifiedClassesOverview();
+		assertThat(overview).hasSize(1);
+
+		PatchHistoryManager.ModifiedClassSummary summary = overview.values().iterator().next();
+		assertThat(summary.isInMemoryModified()).isTrue();
+		assertThat(summary.getDexName()).isEqualTo("classes2.dex");
+		assertThat(summary.getCheckpointCount()).isEqualTo(2);
+
+		jadx.gui.patching.ModifiedDexManager.getInstance().clear();
+	}
 }

@@ -91,33 +91,24 @@ public class ModifiedDexManager {
 
 	/**
 	 * Unregisters a modified class when reverted back to baseline original state.
-	 * Handles both descriptor format (Lpkg/Name;) and dotted format (pkg.Name).
 	 */
 	public synchronized void unregisterModifiedClass(String classType) {
 		if (classType == null) {
 			return;
 		}
-		String clean = classType.trim();
-		String descType;
-		String dottedType;
-		if (clean.startsWith("L") && clean.endsWith(";")) {
-			descType = clean;
-			dottedType = clean.substring(1, clean.length() - 1).replace('/', '.');
-		} else {
-			dottedType = clean;
-			descType = "L" + clean.replace('.', '/') + ";";
-		}
+		String norm = jadx.gui.patching.history.PatchHistoryManager.normalizeClassType(classType);
+		String canon = jadx.gui.patching.history.PatchHistoryManager.canonicalClassType(classType);
+		java.util.function.Predicate<String> matcher = k -> k.equals(classType)
+				|| jadx.gui.patching.history.PatchHistoryManager.normalizeClassType(k).equals(norm)
+				|| jadx.gui.patching.history.PatchHistoryManager.canonicalClassType(k).equals(canon);
+
 		for (Map<String, ModifiedClass> map : modifiedClassesByDex.values()) {
-			map.remove(descType);
-			map.remove(dottedType);
-			map.remove(clean);
+			map.keySet().removeIf(matcher);
 		}
 		for (Map<String, ModifiedClass> map : modifiedClassesBySourceApk.values()) {
-			map.remove(descType);
-			map.remove(dottedType);
-			map.remove(clean);
+			map.keySet().removeIf(matcher);
 		}
-		LOG.info("Unregistered class '{}' (desc='{}') - reverted to baseline.", classType, descType);
+		LOG.info("Unregistered class '{}' (reverted to baseline).", classType);
 	}
 
 	// ─────────────────────────── Query helpers ───────────────────────────

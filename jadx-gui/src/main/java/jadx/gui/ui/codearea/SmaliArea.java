@@ -154,9 +154,6 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					model.loadUI(code);
 					setCaretPosition(0);
 					setLoaded();
-					if (!isShowingDalvikBytecode() && code != null && getJClass() != null) {
-						PatchHistoryManager.getInstance().recordBaseline(getJClass().getFullName(), code);
-					}
 				});
 	}
 
@@ -202,6 +199,10 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			JOptionPane.showMessageDialog(this, "Smali code is empty.", "Apply Smali", JOptionPane.WARNING_MESSAGE);
 			return false;
 		}
+		// Bug 3 fix: normalize line endings before any comparison or commit
+		// On Windows, getText() may return CRLF (\r\n), while git stores LF (\n).
+		// Without this, baseline.equals(smali) is always false on Windows.
+		smaliCode = smaliCode.replace("\r\n", "\n").replace('\r', '\n');
 		try {
 			byte[] dexBytes = SmaliUtils.assemble(smaliCode);
 			if (dexBytes == null || dexBytes.length == 0) {
@@ -223,10 +224,22 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 			List<ClassNode> reloadedTopClasses = new ArrayList<>();
 			String finalTargetDexName = targetDexName;
+
+			// Lazy baseline on first mutation: if not yet recorded, record original APK disassembly
 			String baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classFullName);
-			String normSmali = smaliCode.replace("\r\n", "\n").replace('\r', '\n').trim();
-			String normBaseline = (baselineCode != null) ? baselineCode.replace("\r\n", "\n").replace('\r', '\n').trim() : null;
-			boolean isBaseline = normBaseline != null && normBaseline.equals(normSmali);
+			if (baselineCode == null) {
+				try {
+					String originalSmali = getJClass().getSmali();
+					if (originalSmali != null && !originalSmali.trim().isEmpty()) {
+						PatchHistoryManager.getInstance().recordBaseline(classFullName, originalSmali);
+						baselineCode = PatchHistoryManager.getInstance().getBaselineSmali(classFullName);
+					}
+				} catch (Exception e) {
+					LOG.debug("Could not record initial baseline for {}", classFullName, e);
+				}
+			}
+			// Now works correctly: both sides are LF-normalized
+			boolean isBaseline = baselineCode != null && baselineCode.equals(smaliCode);
 
 			codeLoader.visitClasses(newClsData -> {
 				String rawType = newClsData.getType();
@@ -240,7 +253,6 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 					clsNode.setInputFileName(origDex);
 					if (isBaseline) {
 						ModifiedDexManager.getInstance().unregisterModifiedClass(rawType);
-						ModifiedDexManager.getInstance().unregisterModifiedClass(classFullName);
 					} else {
 						ModifiedDexManager.getInstance().registerModifiedClass(origDex, rawType, dexBytes);
 					}
@@ -269,6 +281,8 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 			}
 
 			String msg = commitMsg != null ? commitMsg : "Modified " + classFullName;
+			// Bug 1 fix: recordEdit now internally deduplicates — if content is identical
+			// to HEAD it will skip the commit. No need to check here separately.
 			PatchHistoryManager.getInstance().recordEdit(classFullName, smaliCode, msg);
 
 			SwingUtilities.invokeLater(() -> {
@@ -304,7 +318,11 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 	public boolean rollbackPreviousEdit() {
 		String classType = getJClass().getFullName();
-		String prevCode = PatchHistoryManager.getInstance().getHistoricalSmali(classType, 1);
+		// Bug 7 fix: don't blindly take index=1; scan history for the first DISTINCT prior state.
+		// With Bug 1 fix, duplicates won't be created anymore, but this protects against any
+		// existing repositories that already have duplicate commits.
+		String currentCode = getText().replace("\r\n", "\n").replace('\r', '\n');
+		String prevCode = PatchHistoryManager.getInstance().getPreviousDistinctSmali(classType, currentCode);
 		if (prevCode == null) {
 			JOptionPane.showMessageDialog(this, "No previous checkpoint found for " + classType, "Rollback", JOptionPane.INFORMATION_MESSAGE);
 			return false;
@@ -330,7 +348,9 @@ public final class SmaliArea extends AbstractCodeArea implements CodeAreaSyncerA
 
 	public void showDiffWithPrevious() {
 		String classType = getJClass().getFullName();
-		String prevCode = PatchHistoryManager.getInstance().getHistoricalSmali(classType, 1);
+		// Bug 7 fix: use same distinct-lookup so diff shows a real change, not a duplicate
+		String currentCode = getText().replace("\r\n", "\n").replace('\r', '\n');
+		String prevCode = PatchHistoryManager.getInstance().getPreviousDistinctSmali(classType, currentCode);
 		if (prevCode == null) {
 			JOptionPane.showMessageDialog(this, "No previous checkpoint to compare with.", "Diff", JOptionPane.INFORMATION_MESSAGE);
 			return;

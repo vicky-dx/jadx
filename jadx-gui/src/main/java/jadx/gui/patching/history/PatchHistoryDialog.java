@@ -18,7 +18,6 @@ import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
 import javax.swing.table.DefaultTableModel;
 
-import jadx.gui.patching.ModifiedDexManager;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.ui.dialog.CommonDialog;
 
@@ -237,16 +236,12 @@ public class PatchHistoryDialog extends CommonDialog {
 
 		String historicalSmali = PatchHistoryManager.getInstance().getSmaliAtCommit(classType, selected.getFullHash());
 		if (historicalSmali != null) {
-			String normCurrent = (currentSmali != null) ? currentSmali.replace("\r\n", "\n").replace('\r', '\n').trim() : "";
-			String normHistorical = historicalSmali.replace("\r\n", "\n").replace('\r', '\n').trim();
-			if (normHistorical.equals(normCurrent)) {
+			String normCurrent = (currentSmali != null) ? currentSmali.replace("\r\n", "\n").replace('\r', '\n') : "";
+			if (historicalSmali.equals(normCurrent)) {
 				JOptionPane.showMessageDialog(this,
 						"Current active code is already identical to checkpoint [" + selected.getShortHash() + "].\nNo rollback needed.",
 						"Rollback", JOptionPane.INFORMATION_MESSAGE);
 				return;
-			}
-			if (selected.isBaseline()) {
-				ModifiedDexManager.getInstance().unregisterModifiedClass(classType);
 			}
 			if (onApplyCode != null) {
 				dispose();
