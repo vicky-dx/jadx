@@ -94,6 +94,7 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 			revalidate();
 			repaint();
 		}
+		updateSync();
 	}
 
 	private JTabbedPane buildTabbedPane(JClass jCls, boolean leftPanel) {
@@ -250,7 +251,7 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 
 	private void updateSync() {
 		caretListeners.removeAll();
-		if (!isSplitViewActivated) {
+		if (!isSplitViewActivated || rightTabbedPane == null) {
 			return;
 		}
 		AbstractCodeArea leftArea = getCodePanel(leftTabbedPane).getCodeArea();
@@ -266,7 +267,16 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 	}
 
 	private void syncCodeArea(AbstractCodeArea fromArea, AbstractCodeArea toArea, CodeAreaSyncer syncer) {
+		if (!isSplitViewActivated || rightTabbedPane == null) {
+			return;
+		}
 		if (syncInProgress.get()) {
+			return;
+		}
+		// Bug 1 fix: SmaliArea loads asynchronously — skip sync until it is fully loaded
+		// to avoid FallbackSyncer receiving an empty text area.
+		if (!toArea.isLoaded()) {
+			LOG.debug("Skipping sync: target area not yet loaded");
 			return;
 		}
 		try {
@@ -274,9 +284,13 @@ public final class ClassCodeContentPanel extends AbstractCodeContentPanel implem
 			boolean synced = ((CodeAreaSyncee) toArea).sync(syncer);
 			if (!synced) {
 				if (!FallbackSyncer.sync(fromArea, toArea)) {
-					LOG.warn("Code pane area sync not possible");
+					LOG.debug("Code pane area sync not possible");
 				}
 			}
+		} catch (jadx.gui.ui.codearea.sync.fallback.FallbackSyncException ex) {
+			// Bug 3 fix: FallbackSyncException is expected when caret is on whitespace,
+			// braces or file boundaries — not a real error, demote to DEBUG.
+			LOG.debug("Fallback sync skipped: {}", ex.getLocalizedMessage());
 		} catch (Exception ex) {
 			LOG.warn("Failed to sync method/class across views: {}", ex.getLocalizedMessage());
 		} finally {

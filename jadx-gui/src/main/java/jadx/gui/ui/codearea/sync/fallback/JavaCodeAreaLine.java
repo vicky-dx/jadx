@@ -1,5 +1,8 @@
 package jadx.gui.ui.codearea.sync.fallback;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import javax.swing.text.BadLocationException;
 
 import org.jetbrains.annotations.Nullable;
@@ -10,6 +13,8 @@ import jadx.gui.ui.codearea.CodeArea;
 
 public class JavaCodeAreaLine extends AbstractCodeAreaLine {
 	private static final Logger LOG = LoggerFactory.getLogger(JavaCodeAreaLine.class);
+	private static final Pattern CLASS_DECL_PATTERN = Pattern.compile(
+			"(?:^|\\s)(?:class|interface|enum)\\s+([a-zA-Z0-9_$]+)");
 
 	public JavaCodeAreaLine(CodeArea area, int lineIndex) throws BadLocationException {
 		super(area, lineIndex);
@@ -22,7 +27,14 @@ public class JavaCodeAreaLine extends AbstractCodeAreaLine {
 
 	@Override
 	public boolean isClassDeclaration() {
-		return getTrimmedStr().matches(".*\\b(class|interface|enum)\\b.*\\{");
+		String trimmed = getTrimmedStr();
+		if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+			return false;
+		}
+		if (!trimmed.endsWith("{")) {
+			return false;
+		}
+		return CLASS_DECL_PATTERN.matcher(trimmed).find();
 	}
 
 	@Override
@@ -64,24 +76,20 @@ public class JavaCodeAreaLine extends AbstractCodeAreaLine {
 			String line = getTrimmedStr();
 			// This may also include fields which are anonymous classes or lambdas
 			return line.endsWith(";") || line.contains(" = ");
+		} catch (FallbackSyncException ex) {
+			LOG.debug("{} - No enclosing scope for field declaration: {}", LOG.getName(), ex.getMessage());
 		} catch (Exception ex) {
-			LOG.error("{} - Unable to determine if line is a field declaration", LOG.getName(), ex);
+			LOG.debug("{} - Unable to determine if line is a field declaration: {}", LOG.getName(), ex.getMessage());
 		}
 		return false;
 	}
 
 	@Override
 	public final @Nullable String extractDeclaredClassName() {
-		if (!isClassDeclaration()) {
-			return null;
-		}
-		String[] tokens = getTrimmedStr().split("\\s+");
-		for (int i = 0; i < tokens.length; i++) {
-			if (tokens[i].equals("class") || tokens[i].equals("interface") || tokens[i].equals("enum")) {
-				if (i + 1 < tokens.length) {
-					return tokens[i + 1];
-				}
-			}
+		String trimmed = getTrimmedStr();
+		Matcher m = CLASS_DECL_PATTERN.matcher(trimmed);
+		if (m.find()) {
+			return m.group(1);
 		}
 		return null;
 	}

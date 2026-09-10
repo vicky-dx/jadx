@@ -63,7 +63,14 @@ abstract class AbstractCodeAreaLine {
 			AbstractCodeAreaLine line = getLineAt(i);
 			boolean enclosingDecl = line.isScopeDeclarationLine();
 			if (enclosingDecl) {
-				return line.getDeclaration();
+				try {
+					IDeclaration candidate = line.getDeclaration();
+					if (candidate != null) {
+						return candidate;
+					}
+				} catch (FallbackSyncException ignored) {
+					// candidate line was a false positive, continue scanning upward
+				}
 			}
 		}
 		throw new FallbackSyncException("No enclosing declaration found for " + this);
